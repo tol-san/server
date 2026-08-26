@@ -45,13 +45,14 @@ async def test_viewer_tracker_participant_joined():
     session_id = str(uuid.uuid4())
     user_id = str(uuid.uuid4())
 
-    mock_redis = AsyncMock()
-    mock_pipeline = AsyncMock()
-    mock_redis.pipeline.return_value = mock_pipeline
-    mock_pipeline.sadd = AsyncMock()
-    mock_pipeline.pfadd = AsyncMock()
-    mock_pipeline.incr = AsyncMock()
+    mock_pipeline = MagicMock()
+    mock_pipeline.sadd = MagicMock()
+    mock_pipeline.pfadd = MagicMock()
+    mock_pipeline.incr = MagicMock()
     mock_pipeline.execute = AsyncMock(return_value=[1, 1, 1])
+
+    mock_redis = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
     mock_redis.scard = AsyncMock(return_value=1)
     mock_redis.get = AsyncMock(return_value=None)  # no peak yet
     mock_redis.set = AsyncMock()
@@ -114,13 +115,14 @@ async def test_viewer_tracker_peak_updated_when_exceeded():
     session_id = str(uuid.uuid4())
     user_id = str(uuid.uuid4())
 
-    mock_redis = AsyncMock()
-    mock_pipeline = AsyncMock()
-    mock_redis.pipeline.return_value = mock_pipeline
-    mock_pipeline.sadd = AsyncMock()
-    mock_pipeline.pfadd = AsyncMock()
-    mock_pipeline.incr = AsyncMock()
+    mock_pipeline = MagicMock()
+    mock_pipeline.sadd = MagicMock()
+    mock_pipeline.pfadd = MagicMock()
+    mock_pipeline.incr = MagicMock()
     mock_pipeline.execute = AsyncMock(return_value=[1, 1, 3])
+
+    mock_redis = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
     mock_redis.scard = AsyncMock(return_value=5)
     mock_redis.get = AsyncMock(return_value="3")  # old peak = 3
     mock_redis.set = AsyncMock()  # expect this to be called to update peak
@@ -129,6 +131,7 @@ async def test_viewer_tracker_peak_updated_when_exceeded():
         await tracker.participant_joined(session_id, user_id)
 
     mock_redis.set.assert_called()  # peak should be updated
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

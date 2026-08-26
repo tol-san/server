@@ -133,13 +133,13 @@ async def test_rate_limit_raises_after_exceeding_limit():
     service = ChatService()
     user_id = str(uuid.uuid4())
 
-    mock_redis = AsyncMock()
-    mock_redis.pipeline.return_value = mock_redis
-    mock_redis.__aenter__ = AsyncMock(return_value=mock_redis)
-    mock_redis.__aexit__ = AsyncMock(return_value=None)
-    mock_redis.execute = AsyncMock(return_value=[11, True])  # count=11 > limit=10
-    mock_redis.incr = AsyncMock(return_value=11)
-    mock_redis.expire = AsyncMock(return_value=True)
+    mock_pipeline = MagicMock()
+    mock_pipeline.incr = MagicMock()
+    mock_pipeline.expire = MagicMock()
+    mock_pipeline.execute = AsyncMock(return_value=[11, True])  # count=11 > limit=10
+
+    mock_redis = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
 
     with patch("app.chats.service.get_redis_client", return_value=mock_redis):
         with pytest.raises(BadRequestException, match="Rate limit exceeded"):
@@ -160,12 +160,13 @@ async def test_presence_join_updates_zset():
     connection_id = str(uuid.uuid4())
     user_id = str(uuid.uuid4())
 
-    mock_redis = AsyncMock()
-    mock_pipeline = AsyncMock()
-    mock_redis.pipeline.return_value = mock_pipeline
-    mock_pipeline.set = AsyncMock()
-    mock_pipeline.zadd = AsyncMock()
+    mock_pipeline = MagicMock()
+    mock_pipeline.set = MagicMock()
+    mock_pipeline.zadd = MagicMock()
     mock_pipeline.execute = AsyncMock(return_value=[True, 1])
+
+    mock_redis = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
 
     with patch("app.chats.presence.get_redis_client", return_value=mock_redis):
         await manager.join(community_id, connection_id, user_id)
@@ -181,16 +182,18 @@ async def test_presence_leave_removes_from_zset():
     community_id = str(uuid.uuid4())
     connection_id = str(uuid.uuid4())
 
-    mock_redis = AsyncMock()
-    mock_pipeline = AsyncMock()
-    mock_redis.pipeline.return_value = mock_pipeline
-    mock_pipeline.delete = AsyncMock()
-    mock_pipeline.zrem = AsyncMock()
+    mock_pipeline = MagicMock()
+    mock_pipeline.delete = MagicMock()
+    mock_pipeline.zrem = MagicMock()
     mock_pipeline.execute = AsyncMock(return_value=[1, 1])
+
+    mock_redis = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
 
     with patch("app.chats.presence.get_redis_client", return_value=mock_redis):
         await manager.leave(community_id, connection_id)
         mock_pipeline.zrem.assert_called_once()
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
