@@ -15,8 +15,8 @@ Comprehensive design specifications and architectural guidelines are available i
 ## Getting Started
 
 ### 1. Prerequisites
-- Python >= 3.14 (or managed via `uv`)
-- [uv](https://docs.astral.sh/uv/) package manager
+- [Docker](https://www.docker.com/) & Docker Compose (for containerized stack: API + PostgreSQL + Redis)
+- Alternatively for local development: Python >= 3.14 and [uv](https://docs.astral.sh/uv/) package manager
 
 ### 2. Setup Environment Variables
 Copy `.env.example` to `.env` (or customize `.env`):
@@ -24,21 +24,57 @@ Copy `.env.example` to `.env` (or customize `.env`):
 cp .env.example .env
 ```
 
-### 3. Install Dependencies
-```bash
-uv sync
-```
+---
 
-### 4. Run Development Server
+### Running with Docker (Recommended)
+
+Start the full stack (FastAPI server, PostgreSQL, Redis) with a single command:
+
 ```bash
-uv run uvicorn app.main:app --reload
+# Build and run all services in background
+docker compose up -d --build
+
+# View logs
+docker compose logs -f
+
+# Check container health and status
+docker compose ps
+
+# Run tests inside server container
+docker compose exec server uv run pytest
+
+# Stop all services
+docker compose down
 ```
 
 Interactive API documentation will be available at:
-- Swagger UI: `http://localhost:8000/api/v1/docs`
-- ReDoc: `http://localhost:8000/api/v1/redoc`
+- **Swagger UI:** [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
+- **ReDoc:** [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc)
+- **Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
 
-### 5. Run Tests
-```bash
-uv run pytest
-```
+---
+
+### Running Locally with `uv`
+
+If running services directly on your host machine:
+
+1. **Start database and cache services (via Docker or local daemon):**
+   ```bash
+   docker compose up -d postgres redis
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   uv sync
+   ```
+
+3. **Run development server:**
+   ```bash
+   uv run uvicorn app.main:app --reload
+   ```
+
+4. **Run test suite:**
+   ```bash
+   uv run pytest
+   ```
+

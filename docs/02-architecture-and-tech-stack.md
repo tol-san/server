@@ -175,8 +175,11 @@ FastAPI manages rooms, permissions, and tokens. Media streaming is delegated to:
 - **Dedicated Test Database**: Isolated test executions
 
 ### Development and Deployment
-- **Docker & Docker Compose**: Local orchestration (PostgreSQL, Redis, App)
-- **Environment variables**: Configured via `.env` files
+- **Docker & Docker Compose**: Full-stack containerized local and deployment orchestration:
+  - **`server`**: FastAPI backend application container built via `uv` on Python 3.14 slim with bytecode pre-compilation and cached layer dependencies. Exposed on `http://localhost:8000`.
+  - **`postgres`**: Relational PostgreSQL 17 engine with automated health checking (`pg_isready`) and persistent volume mounting (`postgres_data`). Exposed on `5432:5432`.
+  - **`redis`**: In-memory Redis 7 engine for cache and presence tracking with automated health checking (`redis-cli ping`) and persistent volume mounting (`redis_data`). Exposed on `6379:6379`.
+- **Environment variables**: Configured via `.env` files with Pydantic `BaseSettings` validation.
 
 ### API Documentation
 Built into FastAPI:
