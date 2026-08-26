@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth.router import router as auth_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.profiles.router import router as profiles_router
+from app.users.router import router as users_router
 
 
 def create_application() -> FastAPI:
@@ -30,6 +32,8 @@ def create_application() -> FastAPI:
 
     # Include routers
     application.include_router(auth_router, prefix=settings.API_V1_STR)
+    application.include_router(users_router, prefix=settings.API_V1_STR)
+    application.include_router(profiles_router, prefix=settings.API_V1_STR)
 
     @application.get("/", tags=["Health"])
     async def root():

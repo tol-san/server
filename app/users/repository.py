@@ -78,5 +78,40 @@ class UserRepository:
         await db.refresh(user)
         return user
 
+    async def update_profile(
+        self,
+        db: AsyncSession,
+        user: User,
+        *,
+        display_name: Optional[str] = None,
+        bio: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+    ) -> Profile:
+        if user.profile is None:
+            profile = Profile(
+                user_id=user.id,
+                display_name=display_name.strip() if display_name is not None else user.username,
+                bio=bio.strip() if bio is not None else None,
+                avatar_url=avatar_url.strip() if avatar_url is not None else None,
+                follower_count=0,
+                following_count=0,
+                post_count=0,
+            )
+            db.add(profile)
+        else:
+            profile = user.profile
+            if display_name is not None:
+                profile.display_name = display_name.strip()
+            if bio is not None:
+                profile.bio = bio.strip() if bio else None
+            if avatar_url is not None:
+                profile.avatar_url = avatar_url.strip() if avatar_url else None
+            db.add(profile)
+
+        await db.commit()
+        await db.refresh(profile)
+        await db.refresh(user)
+        return profile
+
 
 user_repository = UserRepository()
