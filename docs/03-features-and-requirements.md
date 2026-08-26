@@ -105,12 +105,15 @@ Three primary feed streams:
 
 ---
 
-### 3.1.9 Search
-Search capabilities using PostgreSQL `ILIKE` or Full-Text Search:
-- Users (by name and username)
-- Communities (by name and description)
-- Posts (by title and content)
-- Interests (by name)
+### 3.1.9 Search Engine
+Blazing fast, typo-tolerant full-text search powered by **Meilisearch** with automatic index synchronization and resilient PostgreSQL `ILIKE` fallback:
+- **Unified & Domain Search (`/api/v1/search`)**: Query across all domains simultaneously or filter specifically by `users`, `communities`, `posts`, or `interests`.
+- **Users**: Search by display name, username, and bio.
+- **Communities**: Search by name, slug, and description (filtered by accessibility).
+- **Posts**: Search by title and content (filtered by visibility and blocking rules).
+- **Interests**: Search master taxonomy by category name, slug, and description.
+- **Index Synchronization**: Automated background document indexing on creation, update, and deletion hooks, with admin-triggered full database resync (`POST /api/v1/search/sync`).
+- **Resilience**: Automatic fallback to PostgreSQL queries if the search engine is unavailable.
 
 ---
 

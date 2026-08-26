@@ -76,6 +76,24 @@ class CommunityService:
             is_private=payload.is_private,
         )
 
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.index_community(
+            {
+                "id": str(community.id),
+                "name": community.name,
+                "slug": community.slug,
+                "description": community.description,
+                "avatar_url": community.avatar_url,
+                "cover_image_url": community.cover_image_url,
+                "is_private": community.is_private,
+                "owner_id": str(community.owner_id),
+                "member_count": community.member_count,
+                "post_count": community.post_count,
+                "interest_id": str(community.interest_id) if community.interest_id else None,
+                "created_at": community.created_at.isoformat() if community.created_at else None,
+            }
+        )
+
         return CommunityResponse.model_validate(community)
 
     async def get_community(
@@ -132,6 +150,25 @@ class CommunityService:
 
         updates = payload.model_dump(exclude_unset=True)
         updated_community = await self.community_repo.update(db, community, **updates)
+
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.index_community(
+            {
+                "id": str(updated_community.id),
+                "name": updated_community.name,
+                "slug": updated_community.slug,
+                "description": updated_community.description,
+                "avatar_url": updated_community.avatar_url,
+                "cover_image_url": updated_community.cover_image_url,
+                "is_private": updated_community.is_private,
+                "owner_id": str(updated_community.owner_id),
+                "member_count": updated_community.member_count,
+                "post_count": updated_community.post_count,
+                "interest_id": str(updated_community.interest_id) if updated_community.interest_id else None,
+                "created_at": updated_community.created_at.isoformat() if updated_community.created_at else None,
+            }
+        )
+
         return CommunityResponse.model_validate(updated_community)
 
     async def delete_community(
@@ -154,6 +191,10 @@ class CommunityService:
             storage_service.delete_file_by_url(community.avatar_url)
 
         await self.community_repo.delete(db, community)
+
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.delete_community(community_id)
+
         return {"message": f"Community '{community.name}' has been deleted."}
 
     async def list_communities(

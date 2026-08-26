@@ -47,6 +47,21 @@ class ProfileService:
             **updates,
         )
 
+        # Update Meilisearch index
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.index_user(
+            {
+                "id": str(current_user.id),
+                "username": current_user.username,
+                "display_name": profile.display_name if profile and profile.display_name else current_user.username,
+                "avatar_url": profile.avatar_url if profile else None,
+                "bio": profile.bio if profile else None,
+                "follower_count": profile.follower_count if profile else 0,
+                "is_active": current_user.is_active,
+                "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            }
+        )
+
         return CurrentUserProfileResponse(
             id=current_user.id,
             email=current_user.email,

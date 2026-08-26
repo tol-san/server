@@ -66,6 +66,21 @@ class AuthService:
             display_name=payload.display_name,
         )
 
+        # Index user into Meilisearch
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.index_user(
+            {
+                "id": str(user.id),
+                "username": user.username,
+                "display_name": user.profile.display_name if user.profile else user.username,
+                "avatar_url": user.profile.avatar_url if user.profile else None,
+                "bio": user.profile.bio if user.profile else None,
+                "follower_count": 0,
+                "is_active": user.is_active,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+            }
+        )
+
         return user
 
     async def login(

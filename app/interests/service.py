@@ -56,6 +56,19 @@ class InterestService:
             icon_url=payload.icon_url,
             description=payload.description,
         )
+
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.index_interest(
+            {
+                "id": str(interest.id),
+                "name": interest.name,
+                "slug": interest.slug,
+                "description": interest.description,
+                "icon_url": interest.icon_url,
+                "created_at": interest.created_at.isoformat() if interest.created_at else None,
+            }
+        )
+
         return InterestResponse.model_validate(interest)
 
     async def get_user_interests(

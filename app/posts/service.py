@@ -131,6 +131,24 @@ class PostService:
             media=payload.media,
         )
 
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.index_post(
+            {
+                "id": str(post.id),
+                "title": post.title,
+                "content": post.content,
+                "post_type": post.post_type,
+                "visibility": post.visibility,
+                "author_id": str(post.author_id),
+                "author_username": current_user.username,
+                "community_id": str(post.community_id) if post.community_id else None,
+                "community_name": post.community.name if post.community else None,
+                "like_count": post.like_count,
+                "comment_count": post.comment_count,
+                "created_at": post.created_at.isoformat() if post.created_at else None,
+            }
+        )
+
         return map_post_to_response(post)
 
     async def get_post(
@@ -162,6 +180,25 @@ class PostService:
 
         updates = payload.model_dump(exclude_unset=True)
         updated_post = await self.post_repo.update(db, post, **updates)
+
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.index_post(
+            {
+                "id": str(updated_post.id),
+                "title": updated_post.title,
+                "content": updated_post.content,
+                "post_type": updated_post.post_type,
+                "visibility": updated_post.visibility,
+                "author_id": str(updated_post.author_id),
+                "author_username": updated_post.author.username if updated_post.author else None,
+                "community_id": str(updated_post.community_id) if updated_post.community_id else None,
+                "community_name": updated_post.community.name if updated_post.community else None,
+                "like_count": updated_post.like_count,
+                "comment_count": updated_post.comment_count,
+                "created_at": updated_post.created_at.isoformat() if updated_post.created_at else None,
+            }
+        )
+
         return map_post_to_response(updated_post)
 
     async def delete_post(
@@ -189,6 +226,10 @@ class PostService:
                 storage_service.delete_file_by_url(item.thumbnail_url)
 
         await self.post_repo.delete(db, post)
+
+        from app.core.meilisearch import meilisearch_service
+        await meilisearch_service.delete_post(post_id)
+
         return {"message": "Post has been deleted successfully."}
 
     async def list_posts(

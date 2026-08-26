@@ -98,15 +98,20 @@
 | `PATCH` | `/api/v1/comments/{comment_id}` | Edit comment (Author only) |
 | `DELETE` | `/api/v1/comments/{comment_id}` | Delete comment (Author / Moderator) |
 
-### Feeds & Discovery (`/api/v1/feeds`, `/api/v1/search`)
+### Feeds & Discovery (`/api/v1/feeds`, `/api/v1/recommendations`, `/api/v1/search`)
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/v1/feeds/home` | Personalized home feed |
 | `GET` | `/api/v1/feeds/discover` | Community and post discovery feed |
 | `GET` | `/api/v1/feeds/shorts` | Vertical short video feed |
-| `GET` | `/api/v1/search` | Search users, communities, and posts |
-| `GET` | `/api/v1/recommendations/communities` | Recommended communities |
-| `GET` | `/api/v1/recommendations/users` | Recommended users by interest |
+| `GET` | `/api/v1/recommendations/communities` | Recommended communities by interests |
+| `GET` | `/api/v1/recommendations/users` | Recommended users by shared interests |
+| `GET` | `/api/v1/search` | Unified global search across users, communities, posts, and interests |
+| `GET` | `/api/v1/search/users` | Search users by username, display name, or bio |
+| `GET` | `/api/v1/search/communities` | Search communities by name, slug, or description |
+| `GET` | `/api/v1/search/posts` | Search posts by title or text body |
+| `GET` | `/api/v1/search/interests` | Search interests taxonomy |
+| `POST` | `/api/v1/search/sync` | Full index synchronization to Meilisearch (Admin only) |
 
 ### Notifications & Reports (`/api/v1/notifications`, `/api/v1/reports`)
 | Method | Path | Description |
