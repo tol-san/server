@@ -37,6 +37,7 @@ env/
 .env
 .env.*
 !.env.example
+*mcp_config.json
 
 # Testing & Coverage
 .pytest_cache/
