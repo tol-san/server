@@ -51,3 +51,12 @@ async def get_current_active_user(
 ) -> User:
     """Dependency ensuring the user is active."""
     return current_user
+
+
+async def get_current_active_superuser(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Dependency ensuring the user is a superuser."""
+    if not current_user.is_superuser:
+        raise ForbiddenException("Administrator privileges required.")
+    return current_user

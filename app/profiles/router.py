@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_active_user
 from app.core.database import get_db
+from app.interests.schemas import UserInterestsResponse, UserInterestsUpdateRequest
+from app.interests.service import InterestService, interest_service
 from app.profiles.schemas import CurrentUserProfileResponse, ProfileUpdateRequest
 from app.profiles.service import ProfileService, profile_service
 from app.users.models import User
@@ -70,3 +72,34 @@ async def delete_avatar(
     service: ProfileService = Depends(lambda: profile_service),
 ) -> CurrentUserProfileResponse:
     return await service.delete_avatar(db, current_user)
+
+
+@router.get(
+    "/me/interests",
+    response_model=UserInterestsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get user interests",
+    description="Retrieve selected interest categories for the authenticated user.",
+)
+async def get_my_interests(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: InterestService = Depends(lambda: interest_service),
+) -> UserInterestsResponse:
+    return await service.get_user_interests(db, current_user.id)
+
+
+@router.put(
+    "/me/interests",
+    response_model=UserInterestsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update user interests",
+    description="Atomically assign and replace selected interest categories for the authenticated user.",
+)
+async def update_my_interests(
+    payload: UserInterestsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: InterestService = Depends(lambda: interest_service),
+) -> UserInterestsResponse:
+    return await service.update_user_interests(db, current_user.id, payload)
