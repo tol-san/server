@@ -12,6 +12,18 @@ from app.core.exceptions import (
     UsernameAlreadyExistsException,
     register_exception_handlers,
 )
+from app.core.meilisearch import (
+    INDEX_COMMUNITIES,
+    INDEX_CONFIGURATIONS,
+    INDEX_INTERESTS,
+    INDEX_POSTS,
+    INDEX_USERS,
+    MeilisearchService,
+    close_meilisearch,
+    get_meilisearch_client,
+    init_meilisearch_indexes,
+    meilisearch_service,
+)
 from app.core.redis import blacklist_token, get_redis_client, is_token_blacklisted
 from app.core.security import (
     create_access_token,
@@ -39,6 +51,16 @@ __all__ = [
     "get_redis_client",
     "StorageService",
     "storage_service",
+    "MeilisearchService",
+    "meilisearch_service",
+    "get_meilisearch_client",
+    "close_meilisearch",
+    "init_meilisearch_indexes",
+    "INDEX_USERS",
+    "INDEX_COMMUNITIES",
+    "INDEX_POSTS",
+    "INDEX_INTERESTS",
+    "INDEX_CONFIGURATIONS",
     "AppException",
     "BadRequestException",
     "EmailAlreadyExistsException",

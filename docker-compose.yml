@@ -25,12 +25,16 @@ services:
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-genz-media}
       - MINIO_SECURE=false
       - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-http://localhost:9000}
+      - MEILISEARCH_URL=http://meilisearch:7700
+      - MEILISEARCH_MASTER_KEY=${MEILI_MASTER_KEY:-meilisearch_master_key_12345}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      meilisearch:
         condition: service_healthy
     networks:
       - genz_network
@@ -95,12 +99,35 @@ services:
     networks:
       - genz_network
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    container_name: genz_media_meilisearch
+    restart: unless-stopped
+    environment:
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-meilisearch_master_key_12345}
+      - MEILI_ENV=development
+      - MEILI_NO_ANALYTICS=true
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:7700/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - genz_network
+
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
   minio_data:
+    driver: local
+  meilisearch_data:
     driver: local
 
 networks:

@@ -1,14 +1,36 @@
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
+from app.comments.router import router as comments_router
 from app.communities.router import router as communities_router
+from app.core import close_meilisearch, init_meilisearch_indexes
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.core.redis import close_redis
 from app.interests.router import router as interests_router
 from app.posts.router import router as posts_router
 from app.profiles.router import router as profiles_router
 from app.users.router import router as users_router
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    try:
+        await init_meilisearch_indexes()
+    except Exception as exc:
+        logger.warning("Meilisearch initial setup warning: %s", exc)
+
+    yield
+
+    # Shutdown
+    await close_redis()
+    await close_meilisearch()
 
 
 def create_application() -> FastAPI:
@@ -18,6 +40,7 @@ def create_application() -> FastAPI:
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         docs_url=f"{settings.API_V1_STR}/docs",
         redoc_url=f"{settings.API_V1_STR}/redoc",
+        lifespan=lifespan,
     )
 
     # Set up CORS
@@ -40,6 +63,7 @@ def create_application() -> FastAPI:
     application.include_router(interests_router, prefix=settings.API_V1_STR)
     application.include_router(communities_router, prefix=settings.API_V1_STR)
     application.include_router(posts_router, prefix=settings.API_V1_STR)
+    application.include_router(comments_router, prefix=settings.API_V1_STR)
 
     @application.get("/", tags=["Health"])
     async def root():

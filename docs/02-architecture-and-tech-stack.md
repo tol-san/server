@@ -42,7 +42,9 @@ FastAPI
    │
    ├── Redis (Presence, Caching, Session/PubSub)
    │
-   ├── Object Storage / Cloudinary (Media assets)
+   ├── Meilisearch (Typo-tolerant full-text search & indexing)
+   │
+   ├── Object Storage / MinIO (Media assets)
    │
    └── LiveKit / Agora (Live audio/video streaming)
 ```
@@ -143,6 +145,10 @@ app/
 - **FastAPI WebSockets**: Real-time bidirectional connection for community chat
 - **Redis**: In-memory store for online presence and optional pub/sub broadcast
 
+### Search Engine
+- **Meilisearch**: Blazing-fast, typo-tolerant full-text search engine for instant search across Users, Communities, Posts, and Interests.
+- **Python Client**: `meilisearch-python-sdk` providing asynchronous client indexing and multi-search querying.
+
 ### Media Storage
 Media files are **not stored directly in PostgreSQL**. PostgreSQL only stores metadata and media URLs.
 
@@ -179,6 +185,8 @@ FastAPI manages rooms, permissions, and tokens. Media streaming is delegated to:
   - **`server`**: FastAPI backend application container built via `uv` on Python 3.14 slim with bytecode pre-compilation and cached layer dependencies. Exposed on `http://localhost:8000`.
   - **`postgres`**: Relational PostgreSQL 17 engine with automated health checking (`pg_isready`) and persistent volume mounting (`postgres_data`). Exposed on `5432:5432`.
   - **`redis`**: In-memory Redis 7 engine for cache and presence tracking with automated health checking (`redis-cli ping`) and persistent volume mounting (`redis_data`). Exposed on `6379:6379`.
+  - **`meilisearch`**: Meilisearch search engine container with persistent index volume (`meilisearch_data`) and health checking (`curl http://localhost:7700/health`). Exposed on `7700:7700`.
+  - **`minio`**: S3-compatible high-performance object storage with web console. Exposed on `9000:9000` (API) and `9001:9001` (Console).
 - **Environment variables**: Configured via `.env` files with Pydantic `BaseSettings` validation.
 
 ### API Documentation

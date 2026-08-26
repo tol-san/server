@@ -61,5 +61,9 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_PUBLIC_URL: str = "http://localhost:9000"
 
+    # Meilisearch
+    MEILISEARCH_URL: str = "http://localhost:7700"
+    MEILISEARCH_MASTER_KEY: str = "meilisearch_master_key_12345"
+
 
 settings = Settings()
