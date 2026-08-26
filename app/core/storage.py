@@ -22,8 +22,25 @@ ALLOWED_AVATAR_CONTENT_TYPES = {
     "image/gif",
 }
 
+ALLOWED_POST_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+}
+
+ALLOWED_POST_VIDEO_TYPES = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+}
+
 MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_POST_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_POST_VIDEO_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 DEFAULT_AVATAR_MAX_DIMENSION = 512  # Standard mobile profile resolution
+DEFAULT_POST_IMAGE_MAX_DIMENSION = 1920  # High-definition post resolution
 DEFAULT_WEBP_QUALITY = 85
 
 
@@ -172,6 +189,70 @@ class StorageService:
 
         return public_url
 
+    async def upload_post_media(
+        self,
+        user_id: uuid.UUID,
+        file: UploadFile,
+    ) -> dict:
+        """Upload post image (WebP) or short video (MP4/MOV/WebM) to MinIO."""
+        content_type = (file.content_type or "").lower()
+
+        # 1. Image upload
+        if content_type in ALLOWED_POST_IMAGE_TYPES:
+            raw_bytes = await file.read()
+            if len(raw_bytes) > MAX_POST_IMAGE_SIZE_BYTES:
+                raise BadRequestException("Post image size exceeds limit of 10MB.")
+            if len(raw_bytes) == 0:
+                raise BadRequestException("Image file cannot be empty.")
+
+            webp_bytes = self.process_and_convert_to_webp(raw_bytes, max_dimension=DEFAULT_POST_IMAGE_MAX_DIMENSION)
+
+            # Get dimensions from processed WebP
+            with Image.open(io.BytesIO(webp_bytes)) as img:
+                width, height = img.width, img.height
+
+            object_name = f"posts/{user_id}/images/{uuid.uuid4()}.webp"
+            public_url = self.upload_file(
+                file_data=webp_bytes,
+                object_name=object_name,
+                content_type="image/webp",
+            )
+            return {
+                "url": public_url,
+                "media_type": "image",
+                "thumbnail_url": None,
+                "width": width,
+                "height": height,
+                "duration": None,
+            }
+
+        # 2. Video upload
+        if content_type in ALLOWED_POST_VIDEO_TYPES:
+            raw_bytes = await file.read()
+            if len(raw_bytes) > MAX_POST_VIDEO_SIZE_BYTES:
+                raise BadRequestException("Post video size exceeds limit of 50MB.")
+            if len(raw_bytes) == 0:
+                raise BadRequestException("Video file cannot be empty.")
+
+            ext = ALLOWED_POST_VIDEO_TYPES[content_type]
+            object_name = f"posts/{user_id}/videos/{uuid.uuid4()}{ext}"
+            public_url = self.upload_file(
+                file_data=raw_bytes,
+                object_name=object_name,
+                content_type=content_type,
+            )
+            return {
+                "url": public_url,
+                "media_type": "video",
+                "thumbnail_url": None,
+                "width": None,
+                "height": None,
+                "duration": None,
+            }
+
+        allowed_all = list(ALLOWED_POST_IMAGE_TYPES) + list(ALLOWED_POST_VIDEO_TYPES.keys())
+        raise BadRequestException(f"Unsupported media format '{content_type}'. Allowed: {', '.join(allowed_all)}")
+
     def delete_file(
         self,
         object_name: str,
@@ -196,11 +277,11 @@ class StorageService:
             if path.startswith(bucket_name + "/"):
                 object_name = path[len(bucket_name) + 1 :]
                 self.delete_file(object_name, bucket_name)
-            elif "avatars/" in path or "posts/" in path:
+            elif "avatars/" in path or "posts/" in path or "communities/" in path:
                 # Direct relative path
                 self.delete_file(path, bucket_name)
         except Exception as exc:
-            logger.warning("Error parsing avatar URL '%s' for deletion: %s", url, exc)
+            logger.warning("Error parsing URL '%s' for deletion: %s", url, exc)
 
 
 storage_service = StorageService()

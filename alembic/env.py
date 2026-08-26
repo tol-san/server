@@ -6,10 +6,11 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from app.communities.models import Community, CommunityJoinRequest, CommunityMembership  # noqa: F401
 from app.core.config import settings
 from app.core.database import Base
-# Import all models so Alembic autogenerate discovers metadata
 from app.interests.models import Interest, UserInterest  # noqa: F401
+from app.posts.models import Post, PostMedia  # noqa: F401
 from app.users.models import Block, Follow, Profile, User  # noqa: F401
 
 config = context.config
