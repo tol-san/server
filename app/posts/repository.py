@@ -5,13 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.communities.models import Community
-from app.posts.models import Post, PostMedia
+from app.posts.models import Post, PostLike, PostMedia, SavedPost
 from app.posts.schemas import MediaItemCreate
 from app.users.models import Profile, User
 
 
 class PostRepository:
-    """Repository handling database operations for Post and PostMedia entities."""
+    """Repository handling database operations for Post, PostMedia, PostLike, and SavedPost entities."""
 
     async def get_by_id(self, db: AsyncSession, post_id: uuid.UUID) -> Optional[Post]:
         stmt = (
@@ -168,6 +168,115 @@ class PostRepository:
         if filters:
             stmt = stmt.where(*filters)
 
+        result = await db.execute(stmt)
+        return result.scalars().all(), total
+
+    # Engagement operations
+    async def get_like(
+        self, db: AsyncSession, user_id: uuid.UUID, post_id: uuid.UUID
+    ) -> Optional[PostLike]:
+        stmt = select(PostLike).where(
+            PostLike.user_id == user_id, PostLike.post_id == post_id
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def like_post(
+        self, db: AsyncSession, user_id: uuid.UUID, post: Post
+    ) -> Tuple[bool, int]:
+        existing_like = await self.get_like(db, user_id, post.id)
+        if existing_like:
+            return True, post.like_count
+
+        like = PostLike(user_id=user_id, post_id=post.id)
+        db.add(like)
+        post.like_count += 1
+        db.add(post)
+        await db.commit()
+        return True, post.like_count
+
+    async def unlike_post(
+        self, db: AsyncSession, user_id: uuid.UUID, post: Post
+    ) -> Tuple[bool, int]:
+        existing_like = await self.get_like(db, user_id, post.id)
+        if not existing_like:
+            return False, post.like_count
+
+        await db.delete(existing_like)
+        post.like_count = max(0, post.like_count - 1)
+        db.add(post)
+        await db.commit()
+        return False, post.like_count
+
+    async def get_saved(
+        self, db: AsyncSession, user_id: uuid.UUID, post_id: uuid.UUID
+    ) -> Optional[SavedPost]:
+        stmt = select(SavedPost).where(
+            SavedPost.user_id == user_id, SavedPost.post_id == post_id
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def save_post(
+        self, db: AsyncSession, user_id: uuid.UUID, post: Post
+    ) -> Tuple[bool, int]:
+        existing_saved = await self.get_saved(db, user_id, post.id)
+        if existing_saved:
+            return True, post.save_count
+
+        saved = SavedPost(user_id=user_id, post_id=post.id)
+        db.add(saved)
+        post.save_count += 1
+        db.add(post)
+        await db.commit()
+        return True, post.save_count
+
+    async def unsave_post(
+        self, db: AsyncSession, user_id: uuid.UUID, post: Post
+    ) -> Tuple[bool, int]:
+        existing_saved = await self.get_saved(db, user_id, post.id)
+        if not existing_saved:
+            return False, post.save_count
+
+        await db.delete(existing_saved)
+        post.save_count = max(0, post.save_count - 1)
+        db.add(post)
+        await db.commit()
+        return False, post.save_count
+
+    async def increment_share_count(self, db: AsyncSession, post: Post) -> int:
+        post.share_count += 1
+        db.add(post)
+        await db.commit()
+        return post.share_count
+
+    async def list_saved_posts(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: uuid.UUID,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Tuple[Sequence[Post], int]:
+        count_stmt = (
+            select(func.count(SavedPost.id))
+            .where(SavedPost.user_id == user_id)
+        )
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        stmt = (
+            select(Post)
+            .join(SavedPost, SavedPost.post_id == Post.id)
+            .where(SavedPost.user_id == user_id)
+            .options(
+                selectinload(Post.author).selectinload(User.profile),
+                selectinload(Post.community),
+                selectinload(Post.media_items),
+            )
+            .order_by(SavedPost.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         result = await db.execute(stmt)
         return result.scalars().all(), total
 

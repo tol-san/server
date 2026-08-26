@@ -13,6 +13,7 @@ from app.core.redis import close_redis
 from app.interests.router import router as interests_router
 from app.posts.router import router as posts_router
 from app.profiles.router import router as profiles_router
+from app.saved_posts.router import router as saved_posts_router
 from app.users.router import router as users_router
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ def create_application() -> FastAPI:
     application.include_router(communities_router, prefix=settings.API_V1_STR)
     application.include_router(posts_router, prefix=settings.API_V1_STR)
     application.include_router(comments_router, prefix=settings.API_V1_STR)
+    application.include_router(saved_posts_router, prefix=settings.API_V1_STR)
 
     @application.get("/", tags=["Health"])
     async def root():

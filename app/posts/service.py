@@ -12,10 +12,14 @@ from app.posts.schemas import (
     MediaItemResponse,
     MediaUploadResponse,
     PaginatedPostsResponse,
+    PaginatedSavedPostsResponse,
     PostAuthorResponse,
     PostCommunityResponse,
     PostCreateRequest,
+    PostLikeResponse,
     PostResponse,
+    PostSaveResponse,
+    PostShareResponse,
     PostUpdateRequest,
 )
 from app.users.models import User
@@ -220,6 +224,88 @@ class PostService:
     ) -> MediaUploadResponse:
         upload_result = await storage_service.upload_post_media(current_user.id, file)
         return MediaUploadResponse(**upload_result)
+
+    # Engagement service methods
+    async def like_post(
+        self,
+        db: AsyncSession,
+        post_id: uuid.UUID,
+        current_user: User,
+    ) -> PostLikeResponse:
+        post = await self.post_repo.get_by_id(db, post_id)
+        if not post:
+            raise NotFoundException("Post not found.")
+
+        liked, count = await self.post_repo.like_post(db, current_user.id, post)
+        return PostLikeResponse(post_id=post.id, liked=liked, like_count=count)
+
+    async def unlike_post(
+        self,
+        db: AsyncSession,
+        post_id: uuid.UUID,
+        current_user: User,
+    ) -> PostLikeResponse:
+        post = await self.post_repo.get_by_id(db, post_id)
+        if not post:
+            raise NotFoundException("Post not found.")
+
+        liked, count = await self.post_repo.unlike_post(db, current_user.id, post)
+        return PostLikeResponse(post_id=post.id, liked=liked, like_count=count)
+
+    async def save_post(
+        self,
+        db: AsyncSession,
+        post_id: uuid.UUID,
+        current_user: User,
+    ) -> PostSaveResponse:
+        post = await self.post_repo.get_by_id(db, post_id)
+        if not post:
+            raise NotFoundException("Post not found.")
+
+        saved, count = await self.post_repo.save_post(db, current_user.id, post)
+        return PostSaveResponse(post_id=post.id, saved=saved, save_count=count)
+
+    async def unsave_post(
+        self,
+        db: AsyncSession,
+        post_id: uuid.UUID,
+        current_user: User,
+    ) -> PostSaveResponse:
+        post = await self.post_repo.get_by_id(db, post_id)
+        if not post:
+            raise NotFoundException("Post not found.")
+
+        saved, count = await self.post_repo.unsave_post(db, current_user.id, post)
+        return PostSaveResponse(post_id=post.id, saved=saved, save_count=count)
+
+    async def share_post(
+        self,
+        db: AsyncSession,
+        post_id: uuid.UUID,
+        current_user: User,
+    ) -> PostShareResponse:
+        post = await self.post_repo.get_by_id(db, post_id)
+        if not post:
+            raise NotFoundException("Post not found.")
+
+        count = await self.post_repo.increment_share_count(db, post)
+        share_url = f"/posts/{post.id}"
+        return PostShareResponse(post_id=post.id, share_count=count, share_url=share_url)
+
+    async def list_saved_posts(
+        self,
+        db: AsyncSession,
+        current_user: User,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> PaginatedSavedPostsResponse:
+        posts, total = await self.post_repo.list_saved_posts(
+            db, user_id=current_user.id, limit=limit, offset=offset
+        )
+        items = [map_post_to_response(p) for p in posts]
+        return PaginatedSavedPostsResponse(
+            items=items, total=total, limit=limit, offset=offset
+        )
 
 
 post_service = PostService()

@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Optional
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -134,3 +134,68 @@ class PostMedia(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<PostMedia id={self.id} post_id={self.post_id} media_type={self.media_type}>"
+
+
+class PostLike(Base, TimestampMixin):
+    __tablename__ = "post_likes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", name="uq_post_likes_user_post"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("posts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    user = relationship("User", foreign_keys=[user_id], lazy="selectin")
+    post = relationship("Post", foreign_keys=[post_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<PostLike id={self.id} user_id={self.user_id} post_id={self.post_id}>"
+
+
+class SavedPost(Base, TimestampMixin):
+    __tablename__ = "saved_posts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", name="uq_saved_posts_user_post"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("posts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    user = relationship("User", foreign_keys=[user_id], lazy="selectin")
+    post = relationship("Post", foreign_keys=[post_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<SavedPost id={self.id} user_id={self.user_id} post_id={self.post_id}>"
+

@@ -1,6 +1,6 @@
 """Posts module containing Post and PostMedia models, schemas, services, and routers."""
 
-from app.posts.models import Post, PostMedia
+from app.posts.models import Post, PostLike, PostMedia, SavedPost
 from app.posts.repository import PostRepository, post_repository
 from app.posts.router import router as posts_router
 from app.posts.schemas import (
@@ -8,10 +8,14 @@ from app.posts.schemas import (
     MediaItemResponse,
     MediaUploadResponse,
     PaginatedPostsResponse,
+    PaginatedSavedPostsResponse,
     PostAuthorResponse,
     PostCommunityResponse,
     PostCreateRequest,
+    PostLikeResponse,
     PostResponse,
+    PostSaveResponse,
+    PostShareResponse,
     PostUpdateRequest,
 )
 from app.posts.service import PostService, post_service
@@ -19,6 +23,8 @@ from app.posts.service import PostService, post_service
 __all__ = [
     "Post",
     "PostMedia",
+    "PostLike",
+    "SavedPost",
     "PostRepository",
     "post_repository",
     "PostService",
@@ -30,7 +36,11 @@ __all__ = [
     "PostAuthorResponse",
     "PostCommunityResponse",
     "PostResponse",
+    "PostLikeResponse",
+    "PostSaveResponse",
+    "PostShareResponse",
     "PaginatedPostsResponse",
+    "PaginatedSavedPostsResponse",
     "MediaUploadResponse",
     "posts_router",
 ]

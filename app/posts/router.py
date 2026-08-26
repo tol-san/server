@@ -9,7 +9,10 @@ from app.posts.schemas import (
     MediaUploadResponse,
     PaginatedPostsResponse,
     PostCreateRequest,
+    PostLikeResponse,
     PostResponse,
+    PostSaveResponse,
+    PostShareResponse,
     PostUpdateRequest,
 )
 from app.posts.service import PostService, post_service
@@ -125,3 +128,85 @@ async def delete_post(
     service: PostService = Depends(lambda: post_service),
 ) -> dict:
     return await service.delete_post(db, post_id, current_user)
+
+
+# Engagement Endpoints
+@router.post(
+    "/{post_id}/like",
+    response_model=PostLikeResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Like a post",
+    description="Like a post. Idempotent: liking an already liked post keeps the like and returns current status.",
+)
+async def like_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: PostService = Depends(lambda: post_service),
+) -> PostLikeResponse:
+    return await service.like_post(db, post_id, current_user)
+
+
+@router.delete(
+    "/{post_id}/like",
+    response_model=PostLikeResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Unlike a post",
+    description="Remove like from a post. Idempotent: unliking a non-liked post returns current status.",
+)
+async def unlike_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: PostService = Depends(lambda: post_service),
+) -> PostLikeResponse:
+    return await service.unlike_post(db, post_id, current_user)
+
+
+@router.post(
+    "/{post_id}/save",
+    response_model=PostSaveResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Save/bookmark a post",
+    description="Save a post to personal collection. Idempotent: saving an already saved post keeps the bookmark.",
+)
+async def save_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: PostService = Depends(lambda: post_service),
+) -> PostSaveResponse:
+    return await service.save_post(db, post_id, current_user)
+
+
+@router.delete(
+    "/{post_id}/save",
+    response_model=PostSaveResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Unsave/remove bookmark from a post",
+    description="Remove post from saved bookmarks collection. Idempotent.",
+)
+async def unsave_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: PostService = Depends(lambda: post_service),
+) -> PostSaveResponse:
+    return await service.unsave_post(db, post_id, current_user)
+
+
+@router.post(
+    "/{post_id}/share",
+    response_model=PostShareResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Share a post",
+    description="Increment share counter and return shareable link for a post.",
+)
+async def share_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: PostService = Depends(lambda: post_service),
+) -> PostShareResponse:
+    return await service.share_post(db, post_id, current_user)
+

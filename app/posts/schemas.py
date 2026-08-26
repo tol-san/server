@@ -92,3 +92,28 @@ class MediaUploadResponse(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     duration: Optional[float] = None
+
+
+class PostLikeResponse(BaseModel):
+    post_id: uuid.UUID
+    liked: bool
+    like_count: int
+
+
+class PostSaveResponse(BaseModel):
+    post_id: uuid.UUID
+    saved: bool
+    save_count: int
+
+
+class PostShareResponse(BaseModel):
+    post_id: uuid.UUID
+    share_count: int
+    share_url: str
+
+
+class PaginatedSavedPostsResponse(BaseModel):
+    items: List[PostResponse]
+    total: int
+    limit: int
+    offset: int
