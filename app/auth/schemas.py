@@ -10,8 +10,8 @@ class UserRegisterRequest(BaseModel):
         ...,
         min_length=3,
         max_length=30,
-        pattern=r"^[a-zA-Z0-9_-]+$",
-        description="Username must be 3-30 characters (alphanumeric, underscores, hyphens only)",
+        pattern=r"^[a-z0-9_-]+$",
+        description="Username must be 3-30 characters (lowercase letters, numbers, underscores, and hyphens only)",
     )
     password: str = Field(
         ...,

@@ -130,3 +130,14 @@ async def test_register_short_username(async_client: AsyncClient):
     }
     response = await async_client.post("/api/v1/auth/register", json=payload)
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_uppercase_username_rejected(async_client: AsyncClient):
+    payload = {
+        "email": "upper@example.com",
+        "username": "UpperCaseUser",
+        "password": "SecurePassword123!",
+    }
+    response = await async_client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 422
