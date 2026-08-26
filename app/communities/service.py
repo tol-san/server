@@ -433,6 +433,18 @@ class CommunityService:
         # Remove join request
         await self.community_repo.delete_join_request(db, join_req)
 
+        from app.notifications.service import notification_service
+        await notification_service.notify_user(
+            db,
+            recipient_id=join_req.user_id,
+            actor_id=current_user.id,
+            notification_type="community_join_approved",
+            title="Join Request Approved",
+            message=f"Your request to join {community.name} was approved!",
+            entity_type="community",
+            entity_id=community.id,
+        )
+
         return {"message": "Join request approved. User is now a member."}
 
     async def reject_join_request(

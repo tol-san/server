@@ -141,9 +141,31 @@ app/
 - **JWT (JSON Web Tokens)**: Stateless access tokens and refresh tokens
 - **Password Hashing**: bcrypt / Argon2 via passlib / pwd_context
 
-### Real-Time Communication
-- **FastAPI WebSockets**: Real-time bidirectional connection for community chat
-- **Redis**: In-memory store for online presence and optional pub/sub broadcast
+### Real-Time Communication & Event Processing
+- **Redis Streams**: Append-only durable event log for guaranteed, persistent event processing (notifications, event-driven triggers, background consumption).
+- **Redis Pub/Sub**: Ephemeral fire-and-forget message broker for transient real-time signals where message loss is acceptable (typing indicators `"User A is typing..."`, presence status, viewer counts).
+- **Server-Sent Events (SSE)**: One-way persistent HTTP connection for streaming real-time notifications to web/mobile clients (`/api/v1/notifications/stream`).
+- **FastAPI WebSockets**: Bi-directional real-time communication for community group chats and interactive notification channels (`/api/v1/notifications/ws`).
+
+### Redis Caching Architecture & Priority Matrix
+A centralized cache-aside layer ([`app/core/cache.py`](file:///c:/Users/tolsa/Desktop/genz-media/server/app/core/cache.py)) eliminates redundant database queries and provides atomic counting:
+
+| Priority | Feature Area | Cache Key Format | What to Cache | Default TTL | Invalidation Trigger |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **P0 (Tier 1)** | **Discover Feed** | `cache:feed:discover:{limit}:{offset}` | Trending & engagement-ranked posts | 120s | TTL expiry / new viral posts |
+| **P0 (Tier 1)** | **Short Video Feed** | `cache:feed:shorts:{user_id}:{limit}:{offset}` | User-affinity ranked vertical videos | 180s | User interest change, TTL |
+| **P0 (Tier 1)** | **Home Timeline Feed** | `cache:feed:home:{user_id}:{limit}:{offset}` | Timeline from followed users & joined communities | 60s | Followed user posts / join community |
+| **P0 (Tier 1)** | **Recommendations** | `cache:rec:users:{user_id}`<br>`cache:rec:comm:{user_id}` | Overlapping interest matched accounts & spaces | 600s (10m) | User taxonomy interest updates |
+| **P1 (Tier 2)** | **Share Counters** | `cache:post:{post_id}:shares` | Atomic counter via `INCR` + DB write-through | Persistent | Sync on increment |
+| **P1 (Tier 2)** | **Live Rooms State** | `cache:live:{room_id}:state`<br>`cache:live:{room_id}:viewers` | Active room metadata & live viewer count | Dynamic | Room start/end, member join/leave |
+| **P2 (Tier 3)** | **Notifications Unread** | `cache:notif:unread:{user_id}` | Unread count badge value | 300s | New notification / mark as read |
+| **P2 (Tier 3)** | **Popular Search Queries** | `cache:search:unified:{md5}:{limit}:{offset}` | Repeated identical multi-search payloads | 120s | Full index sync, TTL |
+| **P2 (Tier 3)** | **Post Like Counters** | `cache:post:{post_id}:like_count` | Like count buffer | 300s | On like / unlike |
+
+**Non-Cached Entities**:
+- **Reports & Moderation**: Correctness, security, and live state take precedence over latency.
+- **Saved Posts (Bookmarks)**: Single-index fast DB lookups.
+- **Chat Messages Content**: PostgreSQL message history; Redis handles only presence/typing.
 
 ### Search Engine
 - **Meilisearch**: Blazing-fast, typo-tolerant full-text search engine for instant search across Users, Communities, Posts, and Interests.

@@ -97,6 +97,13 @@ class InterestService:
                 raise BadRequestException(f"Invalid interest ID(s) provided: {', '.join(missing)}")
 
         updated_interests = await self.interest_repo.set_user_interests(db, user_id, unique_ids)
+
+        # Invalidate recommendation & shorts cache for this user
+        from app.feeds.service import feed_service
+        from app.recommendations.service import recommendation_service
+        await recommendation_service.invalidate_user_recommendations(user_id)
+        await feed_service.invalidate_user_feeds(user_id)
+
         items = [InterestResponse.model_validate(i) for i in updated_interests]
         return UserInterestsResponse(items=items, total=len(items))
 

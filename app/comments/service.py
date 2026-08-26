@@ -75,6 +75,30 @@ class CommentService:
             parent_id=payload.parent_id,
         )
 
+        from app.notifications.service import notification_service
+        if payload.parent_id and parent_comment.user_id != current_user.id:
+            await notification_service.notify_user(
+                db,
+                recipient_id=parent_comment.user_id,
+                actor_id=current_user.id,
+                notification_type="comment_reply",
+                title="New Reply",
+                message=f"{current_user.username} replied to your comment.",
+                entity_type="comment",
+                entity_id=comment.id,
+            )
+        elif not payload.parent_id and post.author_id != current_user.id:
+            await notification_service.notify_user(
+                db,
+                recipient_id=post.author_id,
+                actor_id=current_user.id,
+                notification_type="post_comment",
+                title="New Comment",
+                message=f"{current_user.username} commented on your post.",
+                entity_type="comment",
+                entity_id=comment.id,
+            )
+
         return map_comment_to_response(comment)
 
     async def get_comment(

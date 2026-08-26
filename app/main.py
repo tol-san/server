@@ -12,9 +12,11 @@ from app.core.exceptions import register_exception_handlers
 from app.core.redis import close_redis
 from app.feeds.router import router as feeds_router
 from app.interests.router import router as interests_router
+from app.notifications.router import router as notifications_router
 from app.posts.router import router as posts_router
 from app.profiles.router import router as profiles_router
 from app.recommendations.router import router as recommendations_router
+from app.reports.router import router as reports_router
 from app.saved_posts.router import router as saved_posts_router
 from app.search.router import router as search_router
 from app.users.router import router as users_router
@@ -72,6 +74,8 @@ def create_application() -> FastAPI:
     application.include_router(feeds_router, prefix=settings.API_V1_STR)
     application.include_router(recommendations_router, prefix=settings.API_V1_STR)
     application.include_router(search_router, prefix=settings.API_V1_STR)
+    application.include_router(notifications_router, prefix=settings.API_V1_STR)
+    application.include_router(reports_router, prefix=settings.API_V1_STR)
 
     @application.get("/", tags=["Health"])
     async def root():

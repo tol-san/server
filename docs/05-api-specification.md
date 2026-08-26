@@ -116,10 +116,18 @@
 ### Notifications & Reports (`/api/v1/notifications`, `/api/v1/reports`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/v1/notifications` | Get user notifications |
+| `GET` | `/api/v1/notifications` | Paginated user notifications with `unread_only` filter |
+| `GET` | `/api/v1/notifications/unread-count` | Get total unread notifications count for badge |
 | `PATCH` | `/api/v1/notifications/{notification_id}/read` | Mark single notification as read |
 | `POST` | `/api/v1/notifications/read-all` | Mark all notifications as read |
-| `POST` | `/api/v1/reports` | Submit report against user/content/community |
+| `DELETE` | `/api/v1/notifications/{notification_id}` | Delete notification from user history |
+| `GET` | `/api/v1/notifications/stream` | Server-Sent Events (SSE) stream powered by Redis Streams |
+| `WS` | `/api/v1/notifications/ws` | Real-time WebSocket connection for live notifications |
+| `POST` | `/api/v1/notifications/typing` | Broadcast typing status via Redis Pub/Sub |
+| `POST` | `/api/v1/reports` | Submit report against user, post, comment, community, or chat |
+| `GET` | `/api/v1/reports` | List reports with status, type, and community filters (Admin/Owner) |
+| `GET` | `/api/v1/reports/{report_id}` | Get report details (Admin or Community Owner) |
+| `PATCH` | `/api/v1/reports/{report_id}/status` | Update report status (`PENDING` -> `REVIEWING` -> `RESOLVED`/`REJECTED`) and apply actions |
 
 ### Real-Time Chat & Live Rooms (`/api/v1/chats`, `/api/v1/live-rooms`)
 | Method | Path | Description |

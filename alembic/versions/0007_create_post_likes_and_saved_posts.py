@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "0007_create_post_likes_and_saved_posts"
+revision: str = "0007_post_likes_saved_posts"
 down_revision: Union[str, None] = "0006_create_comments"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

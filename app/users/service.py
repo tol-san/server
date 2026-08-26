@@ -60,6 +60,19 @@ class UserService:
             raise ForbiddenException("Cannot follow this user.")
 
         await self.user_repo.follow_user(db, current_user.id, target_user_id)
+
+        from app.notifications.service import notification_service
+        await notification_service.notify_user(
+            db,
+            recipient_id=target_user_id,
+            actor_id=current_user.id,
+            notification_type="new_follower",
+            title="New Follower",
+            message=f"{current_user.username} started following you.",
+            entity_type="user",
+            entity_id=current_user.id,
+        )
+
         return FollowActionResponse(
             is_following=True,
             message=f"You are now following {target_user.username}.",

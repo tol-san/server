@@ -55,9 +55,52 @@ async def is_token_blacklisted(jti: str) -> bool:
         return False
 
 
+async def add_to_stream(stream_name: str, fields: dict) -> Optional[str]:
+    """Append an event to a Redis Stream (durable event log)."""
+    try:
+        client = get_redis_client()
+        # Convert all values in fields to string
+        str_fields = {k: str(v) if v is not None else "" for k, v in fields.items()}
+        msg_id = await client.xadd(stream_name, str_fields)
+        return msg_id
+    except Exception as exc:
+        logger.debug("Redis stream add failed (%s): %s", stream_name, exc)
+        return None
+
+
+async def read_from_stream(
+    stream_name: str,
+    last_id: str = "$",
+    count: int = 10,
+    block_ms: int = 2000,
+) -> list:
+    """Read new events from a Redis Stream."""
+    try:
+        client = get_redis_client()
+        res = await client.xread({stream_name: last_id}, count=count, block=block_ms)
+        return res or []
+    except Exception as exc:
+        logger.debug("Redis stream read failed (%s): %s", stream_name, exc)
+        return []
+
+
+async def publish_pubsub(channel: str, message: str) -> int:
+    """Publish ephemeral message via Redis Pub/Sub (fire-and-forget, e.g. typing indicators)."""
+    try:
+        client = get_redis_client()
+        return await client.publish(channel, message)
+    except Exception as exc:
+        logger.debug("Redis pub/sub failed on channel %s: %s", channel, exc)
+        return 0
+
+
 async def close_redis() -> None:
     """Gracefully close Redis connections."""
     global redis_client
     if redis_client is not None:
-        await redis_client.aclose()
-        redis_client = None
+        try:
+            await redis_client.aclose()
+        except Exception as exc:
+            logger.warning("Error closing Redis client: %s", exc)
+        finally:
+            redis_client = None

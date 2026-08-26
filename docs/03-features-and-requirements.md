@@ -140,28 +140,32 @@ FastAPI manages business logic and access control while external services (LiveK
 
 ---
 
-### 3.1.12 Notifications
-In-app database notifications for key triggers:
-- New follower
-- Post liked
-- Post commented / comment replied
-- Community join request approved / rejected
-- New post published in joined community
-- Live room started in joined community
-
-Actions: View notifications, mark as read, mark all as read.
+### 3.1.12 Notifications Engine
+Event-driven in-app notifications system powered by PostgreSQL persistence, **Redis Streams** for durable event processing, and multi-channel real-time streaming:
+- **Event Triggers**:
+  - `new_follower`: When a user is followed.
+  - `post_like`: When a user's post is liked.
+  - `post_comment` & `comment_reply`: When a post is commented on or a comment receives a reply.
+  - `community_join_approved`: When a private community join request is approved.
+- **Delivery Channels**:
+  - **REST API (`/api/v1/notifications`)**: Paginated list, unread count badge query, mark individual/all as read, delete notification.
+  - **Server-Sent Events (SSE) (`/api/v1/notifications/stream`)**: Real-time push streaming from Redis Streams.
+  - **WebSocket (`/api/v1/notifications/ws`)**: Interactive bidirectional socket for instant notifications.
+  - **Ephemeral Signals (Redis Pub/Sub)**: Fire-and-forget real-time signals such as typing indicators (`"User A is typing..."` at `/api/v1/notifications/typing`).
 
 ---
 
-### 3.1.13 Report & Moderation
-Users can report: Users, Posts, Comments, Communities, and Chat Messages.
-
-**Report Statuses:**
-`PENDING` → `REVIEWING` → `RESOLVED` / `REJECTED`
-
-**Role Separation:**
-- **System Admin:** Platform-wide moderation, resolve global reports, suspend/ban users, close communities, manage master interests.
-- **Community Owner:** Community-level moderation only (delete posts/chat messages in their community, manage members).
+### 3.1.13 Report & Moderation Workflow
+Multi-entity reporting and stateful moderation lifecycle:
+- **Reportable Entities**: Users, Posts, Comments, Communities, and Chat Messages.
+- **Reasons**: `spam`, `harassment`, `inappropriate_content`, `hate_speech`, `violence`, `copyright`, `other`.
+- **Moderation Workflow States**:
+  `PENDING` → `REVIEWING` → `RESOLVED` / `REJECTED`
+- **Resolution Actions**:
+  `none`, `content_deleted`, `user_warned`, `user_suspended`, `community_closed`, `dismissed`.
+- **Role-Based Access Control (RBAC)**:
+  - **System Admin**: Platform-wide moderation, review global reports, suspend/deactivate user accounts, close communities.
+  - **Community Owner**: Community-scoped moderation for reports on content within their owned communities.
 
 ---
 

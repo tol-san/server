@@ -86,3 +86,5 @@ erDiagram
 - **`user_interests`**: `UNIQUE(user_id, interest_id)`.
 - **`community_memberships`**: `UNIQUE(user_id, community_id)`.
 - **`posts`**: Indexes on `author_id`, `community_id`, `created_at`, and `visibility`.
+- **`notifications`**: Indexes on `recipient_id`, `actor_id`, `is_read`, and `created_at`.
+- **`reports`**: Indexes on `reporter_id`, `target_id`, `community_id`, `status`, and `created_at`.

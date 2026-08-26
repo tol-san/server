@@ -278,6 +278,22 @@ class PostService:
             raise NotFoundException("Post not found.")
 
         liked, count = await self.post_repo.like_post(db, current_user.id, post)
+        from app.core.cache import cache_service
+        await cache_service.set(f"cache:post:{post.id}:like_count", count, ttl=300)
+
+        if liked and post.author_id != current_user.id:
+            from app.notifications.service import notification_service
+            await notification_service.notify_user(
+                db,
+                recipient_id=post.author_id,
+                actor_id=current_user.id,
+                notification_type="post_like",
+                title="Post Liked",
+                message=f"{current_user.username} liked your post.",
+                entity_type="post",
+                entity_id=post.id,
+            )
+
         return PostLikeResponse(post_id=post.id, liked=liked, like_count=count)
 
     async def unlike_post(
@@ -291,6 +307,8 @@ class PostService:
             raise NotFoundException("Post not found.")
 
         liked, count = await self.post_repo.unlike_post(db, current_user.id, post)
+        from app.core.cache import cache_service
+        await cache_service.set(f"cache:post:{post.id}:like_count", count, ttl=300)
         return PostLikeResponse(post_id=post.id, liked=liked, like_count=count)
 
     async def save_post(
@@ -329,6 +347,8 @@ class PostService:
         if not post:
             raise NotFoundException("Post not found.")
 
+        from app.core.cache import cache_service
+        await cache_service.incr(f"cache:post:{post.id}:shares")
         count = await self.post_repo.increment_share_count(db, post)
         share_url = f"/posts/{post.id}"
         return PostShareResponse(post_id=post.id, share_count=count, share_url=share_url)

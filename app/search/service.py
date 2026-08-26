@@ -297,7 +297,17 @@ class SearchService:
         limit: int = 10,
         offset: int = 0,
     ) -> UnifiedSearchResponse:
-        """Unified multi-domain search across Users, Communities, Posts, and Interests."""
+        """Unified multi-domain search across Users, Communities, Posts, and Interests with Redis caching."""
+        import hashlib
+        from app.core.cache import cache_service
+
+        q_hash = hashlib.md5(query.strip().lower().encode("utf-8")).hexdigest()
+        cache_key = f"cache:search:unified:{q_hash}:{limit}:{offset}"
+        if not current_user:
+            cached = await cache_service.get(cache_key)
+            if cached:
+                return UnifiedSearchResponse.model_validate(cached)
+
         users_resp = await self.search_users(
             db, current_user, query, limit=limit, offset=offset
         )
@@ -318,7 +328,7 @@ class SearchService:
             + interests_resp.total
         )
 
-        return UnifiedSearchResponse(
+        resp = UnifiedSearchResponse(
             query=query,
             users=users_resp.items,
             communities=comm_resp.items,
@@ -326,6 +336,11 @@ class SearchService:
             interests=interests_resp.items,
             total_results=total_results,
         )
+
+        if not current_user:
+            await cache_service.set(cache_key, resp.model_dump(mode="json"), ttl=120)
+
+        return resp
 
     async def sync_all_indexes(self, db: AsyncSession) -> SyncIndexResponse:
         """Extract all database records and index them into Meilisearch."""
