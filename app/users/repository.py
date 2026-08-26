@@ -1,14 +1,14 @@
 import uuid
-from typing import Optional
-from sqlalchemy import or_, select
+from typing import Optional, Sequence, Tuple
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.users.models import Profile, User
+from app.users.models import Block, Follow, Profile, User
 
 
 class UserRepository:
-    """Repository handling database operations for User and Profile entities."""
+    """Repository handling database operations for User, Profile, Follow, and Block entities."""
 
     async def get_by_id(self, db: AsyncSession, user_id: uuid.UUID) -> Optional[User]:
         stmt = select(User).where(User.id == user_id).options(selectinload(User.profile))
@@ -112,6 +112,215 @@ class UserRepository:
         await db.refresh(profile)
         await db.refresh(user)
         return profile
+
+    # --- Follow Operations ---
+
+    async def is_following(self, db: AsyncSession, follower_id: uuid.UUID, following_id: uuid.UUID) -> bool:
+        stmt = select(Follow.id).where(
+            Follow.follower_id == follower_id,
+            Follow.following_id == following_id,
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def follow_user(self, db: AsyncSession, follower_id: uuid.UUID, following_id: uuid.UUID) -> bool:
+        # Check if already following
+        stmt = select(Follow).where(
+            Follow.follower_id == follower_id,
+            Follow.following_id == following_id,
+        )
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing:
+            return False  # Already following
+
+        follow = Follow(follower_id=follower_id, following_id=following_id)
+        db.add(follow)
+
+        # Update follower's following_count
+        follower_profile = (await db.execute(select(Profile).where(Profile.user_id == follower_id))).scalar_one_or_none()
+        if follower_profile:
+            follower_profile.following_count += 1
+            db.add(follower_profile)
+
+        # Update following's follower_count
+        following_profile = (await db.execute(select(Profile).where(Profile.user_id == following_id))).scalar_one_or_none()
+        if following_profile:
+            following_profile.follower_count += 1
+            db.add(following_profile)
+
+        await db.commit()
+        return True
+
+    async def unfollow_user(self, db: AsyncSession, follower_id: uuid.UUID, following_id: uuid.UUID) -> bool:
+        stmt = select(Follow).where(
+            Follow.follower_id == follower_id,
+            Follow.following_id == following_id,
+        )
+        follow = (await db.execute(stmt)).scalar_one_or_none()
+        if not follow:
+            return False  # Not following
+
+        await db.delete(follow)
+
+        # Update follower's following_count
+        follower_profile = (await db.execute(select(Profile).where(Profile.user_id == follower_id))).scalar_one_or_none()
+        if follower_profile:
+            follower_profile.following_count = max(0, follower_profile.following_count - 1)
+            db.add(follower_profile)
+
+        # Update following's follower_count
+        following_profile = (await db.execute(select(Profile).where(Profile.user_id == following_id))).scalar_one_or_none()
+        if following_profile:
+            following_profile.follower_count = max(0, following_profile.follower_count - 1)
+            db.add(following_profile)
+
+        await db.commit()
+        return True
+
+    async def get_followers(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Tuple[Sequence[User], int]:
+        count_stmt = select(func.count(Follow.id)).where(Follow.following_id == user_id)
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        stmt = (
+            select(User)
+            .join(Follow, Follow.follower_id == User.id)
+            .where(Follow.following_id == user_id)
+            .options(selectinload(User.profile))
+            .order_by(Follow.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all(), total
+
+    async def get_following(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Tuple[Sequence[User], int]:
+        count_stmt = select(func.count(Follow.id)).where(Follow.follower_id == user_id)
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        stmt = (
+            select(User)
+            .join(Follow, Follow.following_id == User.id)
+            .where(Follow.follower_id == user_id)
+            .options(selectinload(User.profile))
+            .order_by(Follow.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all(), total
+
+    # --- Block Operations ---
+
+    async def is_blocking(self, db: AsyncSession, blocker_id: uuid.UUID, blocked_id: uuid.UUID) -> bool:
+        stmt = select(Block.id).where(
+            Block.blocker_id == blocker_id,
+            Block.blocked_id == blocked_id,
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def is_blocked_bidirectional(self, db: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID) -> bool:
+        stmt = select(Block.id).where(
+            or_(
+                (Block.blocker_id == user_a) & (Block.blocked_id == user_b),
+                (Block.blocker_id == user_b) & (Block.blocked_id == user_a),
+            )
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def block_user(self, db: AsyncSession, blocker_id: uuid.UUID, blocked_id: uuid.UUID) -> bool:
+        # Check if already blocking
+        stmt = select(Block).where(
+            Block.blocker_id == blocker_id,
+            Block.blocked_id == blocked_id,
+        )
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing:
+            return False  # Already blocked
+
+        block = Block(blocker_id=blocker_id, blocked_id=blocked_id)
+        db.add(block)
+
+        # Sever follow: blocker -> blocked (if exists)
+        follow1 = (await db.execute(
+            select(Follow).where(Follow.follower_id == blocker_id, Follow.following_id == blocked_id)
+        )).scalar_one_or_none()
+        if follow1:
+            await db.delete(follow1)
+            p1 = (await db.execute(select(Profile).where(Profile.user_id == blocker_id))).scalar_one_or_none()
+            if p1:
+                p1.following_count = max(0, p1.following_count - 1)
+                db.add(p1)
+            p2 = (await db.execute(select(Profile).where(Profile.user_id == blocked_id))).scalar_one_or_none()
+            if p2:
+                p2.follower_count = max(0, p2.follower_count - 1)
+                db.add(p2)
+
+        # Sever follow: blocked -> blocker (if exists)
+        follow2 = (await db.execute(
+            select(Follow).where(Follow.follower_id == blocked_id, Follow.following_id == blocker_id)
+        )).scalar_one_or_none()
+        if follow2:
+            await db.delete(follow2)
+            p2 = (await db.execute(select(Profile).where(Profile.user_id == blocked_id))).scalar_one_or_none()
+            if p2:
+                p2.following_count = max(0, p2.following_count - 1)
+                db.add(p2)
+            p1 = (await db.execute(select(Profile).where(Profile.user_id == blocker_id))).scalar_one_or_none()
+            if p1:
+                p1.follower_count = max(0, p1.follower_count - 1)
+                db.add(p1)
+
+        await db.commit()
+        return True
+
+    async def unblock_user(self, db: AsyncSession, blocker_id: uuid.UUID, blocked_id: uuid.UUID) -> bool:
+        stmt = select(Block).where(
+            Block.blocker_id == blocker_id,
+            Block.blocked_id == blocked_id,
+        )
+        block = (await db.execute(stmt)).scalar_one_or_none()
+        if not block:
+            return False  # Not blocked
+
+        await db.delete(block)
+        await db.commit()
+        return True
+
+    async def get_blocked_users(
+        self,
+        db: AsyncSession,
+        blocker_id: uuid.UUID,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Tuple[Sequence[User], int]:
+        count_stmt = select(func.count(Block.id)).where(Block.blocker_id == blocker_id)
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        stmt = (
+            select(User)
+            .join(Block, Block.blocked_id == User.id)
+            .where(Block.blocker_id == blocker_id)
+            .options(selectinload(User.profile))
+            .order_by(Block.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all(), total
 
 
 user_repository = UserRepository()

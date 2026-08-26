@@ -1,18 +1,27 @@
-"""Users module containing User and Profile models, schemas, services, and routers."""
+"""Users module containing User, Profile, Follow, and Block models and repositories."""
 
-from app.users.models import Profile, User
+from app.users.models import Block, Follow, Profile, User
 from app.users.repository import UserRepository, user_repository
-from app.users.router import router as users_router
-from app.users.schemas import UserPublicResponse
-from app.users.service import UserService, user_service
+from app.users.schemas import (
+    BlockActionResponse,
+    FollowActionResponse,
+    PaginatedUsersResponse,
+    RelationshipResponse,
+    UserItemResponse,
+    UserPublicResponse,
+)
 
 __all__ = [
     "User",
     "Profile",
+    "Follow",
+    "Block",
     "UserRepository",
     "user_repository",
-    "UserService",
-    "user_service",
     "UserPublicResponse",
-    "users_router",
+    "UserItemResponse",
+    "PaginatedUsersResponse",
+    "RelationshipResponse",
+    "FollowActionResponse",
+    "BlockActionResponse",
 ]

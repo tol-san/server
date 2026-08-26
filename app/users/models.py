@@ -1,7 +1,6 @@
 import uuid
 from typing import Optional
-from sqlalchemy import Boolean, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -108,3 +107,67 @@ class Profile(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<Profile id={self.id} user_id={self.user_id} display_name={self.display_name}>"
+
+
+class Follow(Base, TimestampMixin):
+    __tablename__ = "follows"
+    __table_args__ = (
+        UniqueConstraint("follower_id", "following_id", name="uq_follow_follower_following"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+    follower_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    following_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    follower: Mapped["User"] = relationship("User", foreign_keys=[follower_id], lazy="selectin")
+    following: Mapped["User"] = relationship("User", foreign_keys=[following_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<Follow id={self.id} follower_id={self.follower_id} following_id={self.following_id}>"
+
+
+class Block(Base, TimestampMixin):
+    __tablename__ = "blocks"
+    __table_args__ = (
+        UniqueConstraint("blocker_id", "blocked_id", name="uq_block_blocker_blocked"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+    blocker_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    blocked_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    blocker: Mapped["User"] = relationship("User", foreign_keys=[blocker_id], lazy="selectin")
+    blocked: Mapped["User"] = relationship("User", foreign_keys=[blocked_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<Block id={self.id} blocker_id={self.blocker_id} blocked_id={self.blocked_id}>"
