@@ -46,7 +46,7 @@ async def update_my_profile(
     response_model=CurrentUserProfileResponse,
     status_code=status.HTTP_200_OK,
     summary="Upload user avatar image",
-    description="Upload an avatar image (JPEG, PNG, WebP, GIF, max 5MB) to MinIO object storage and update profile.",
+    description="Upload an avatar image (JPEG, PNG, WebP, GIF, max 5MB), converts to mobile-optimized WebP, stores in MinIO, and updates profile.",
 )
 async def upload_avatar(
     file: UploadFile = File(..., description="Avatar image file to upload"),
@@ -55,3 +55,18 @@ async def upload_avatar(
     service: ProfileService = Depends(lambda: profile_service),
 ) -> CurrentUserProfileResponse:
     return await service.upload_avatar(db, current_user, file)
+
+
+@router.delete(
+    "/me/avatar",
+    response_model=CurrentUserProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete user avatar",
+    description="Delete the current avatar image from MinIO and reset avatar_url to null.",
+)
+async def delete_avatar(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: ProfileService = Depends(lambda: profile_service),
+) -> CurrentUserProfileResponse:
+    return await service.delete_avatar(db, current_user)

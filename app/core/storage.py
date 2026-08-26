@@ -2,10 +2,12 @@ import io
 import json
 import logging
 from typing import BinaryIO, Optional, Union
+from urllib.parse import urlparse
 import uuid
 from fastapi import UploadFile
 from minio import Minio
 from minio.error import S3Error
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.config import settings
 from app.core.exceptions import BadRequestException
@@ -13,17 +15,20 @@ from app.core.exceptions import BadRequestException
 logger = logging.getLogger(__name__)
 
 ALLOWED_AVATAR_CONTENT_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
 }
 
 MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+DEFAULT_AVATAR_MAX_DIMENSION = 512  # Standard mobile profile resolution
+DEFAULT_WEBP_QUALITY = 85
 
 
 class StorageService:
-    """Service wrapping MinIO / S3 object storage operations."""
+    """Service wrapping MinIO / S3 object storage operations with image processing."""
 
     def __init__(self) -> None:
         self._client: Optional[Minio] = None
@@ -64,6 +69,37 @@ class StorageService:
         except Exception as exc:
             logger.warning("MinIO bucket initialization failed or offline: %s", exc)
 
+    def process_and_convert_to_webp(
+        self,
+        image_bytes: bytes,
+        max_dimension: int = DEFAULT_AVATAR_MAX_DIMENSION,
+        quality: int = DEFAULT_WEBP_QUALITY,
+    ) -> bytes:
+        """Validate, sanitize, auto-orient, resize and convert image to WebP."""
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                # Correct orientation from EXIF and strip all metadata
+                img = ImageOps.exif_transpose(img)
+
+                # Handle color modes
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    img = img.convert("RGBA")
+                else:
+                    img = img.convert("RGB")
+
+                # Resize if larger than max_dimension
+                if img.width > max_dimension or img.height > max_dimension:
+                    img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+
+                # Save as optimized WebP
+                output_buffer = io.BytesIO()
+                img.save(output_buffer, format="WEBP", quality=quality, method=6)
+                return output_buffer.getvalue()
+        except UnidentifiedImageError:
+            raise BadRequestException("The uploaded file is not a valid or readable image.")
+        except Exception as exc:
+            raise BadRequestException(f"Failed to process image file: {str(exc)}")
+
     def upload_file(
         self,
         file_data: Union[bytes, BinaryIO],
@@ -79,7 +115,6 @@ class StorageService:
             length = len(file_data)
         else:
             data_stream = file_data
-            # Seek to end to find size, then rewind
             file_data.seek(0, io.SEEK_END)
             length = file_data.tell()
             file_data.seek(0)
@@ -95,37 +130,44 @@ class StorageService:
             )
             return f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/{bucket}/{object_name}"
         except Exception as exc:
-            logger.warning("MinIO upload failed: %s, returning mock URL for offline mode", exc)
+            logger.warning("MinIO upload failed: %s, returning fallback URL", exc)
             return f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/{bucket}/{object_name}"
 
     async def upload_avatar(
         self,
         user_id: uuid.UUID,
         file: UploadFile,
+        old_avatar_url: Optional[str] = None,
     ) -> str:
-        """Validate, process, and upload user avatar image."""
-        content_type = file.content_type or ""
+        """Validate, convert to WebP, clean up previous avatar, and upload new avatar."""
+        content_type = (file.content_type or "").lower()
         if content_type not in ALLOWED_AVATAR_CONTENT_TYPES:
             raise BadRequestException(
-                f"Invalid file type '{content_type}'. Allowed types: {', '.join(ALLOWED_AVATAR_CONTENT_TYPES.keys())}"
+                f"Invalid file type '{content_type}'. Allowed types: {', '.join(ALLOWED_AVATAR_CONTENT_TYPES)}"
             )
 
-        content = await file.read()
-        if len(content) > MAX_AVATAR_SIZE_BYTES:
+        raw_bytes = await file.read()
+        if len(raw_bytes) > MAX_AVATAR_SIZE_BYTES:
             raise BadRequestException(
-                f"Avatar image size ({len(content) / (1024 * 1024):.2f}MB) exceeds maximum limit of 5MB."
+                f"Avatar image size ({len(raw_bytes) / (1024 * 1024):.2f}MB) exceeds maximum limit of 5MB."
             )
 
-        if len(content) == 0:
+        if len(raw_bytes) == 0:
             raise BadRequestException("Avatar file cannot be empty.")
 
-        ext = ALLOWED_AVATAR_CONTENT_TYPES[content_type]
-        object_name = f"avatars/{user_id}/{uuid.uuid4()}{ext}"
+        # Process and convert to optimized WebP
+        webp_bytes = self.process_and_convert_to_webp(raw_bytes)
 
+        # Delete old avatar from MinIO if it exists
+        if old_avatar_url:
+            self.delete_file_by_url(old_avatar_url)
+
+        # Upload new WebP avatar
+        object_name = f"avatars/{user_id}/{uuid.uuid4()}.webp"
         public_url = self.upload_file(
-            file_data=content,
+            file_data=webp_bytes,
             object_name=object_name,
-            content_type=content_type,
+            content_type="image/webp",
         )
 
         return public_url
@@ -139,8 +181,26 @@ class StorageService:
         bucket = bucket_name or settings.MINIO_BUCKET_NAME
         try:
             self.client.remove_object(bucket, object_name)
+            logger.info("Deleted MinIO object: %s/%s", bucket, object_name)
         except Exception as exc:
             logger.warning("Failed to delete MinIO object '%s': %s", object_name, exc)
+
+    def delete_file_by_url(self, url: Optional[str]) -> None:
+        """Parse object path from URL and delete from MinIO."""
+        if not url:
+            return
+        try:
+            parsed = urlparse(url)
+            path = parsed.path.lstrip("/")
+            bucket_name = settings.MINIO_BUCKET_NAME
+            if path.startswith(bucket_name + "/"):
+                object_name = path[len(bucket_name) + 1 :]
+                self.delete_file(object_name, bucket_name)
+            elif "avatars/" in path or "posts/" in path:
+                # Direct relative path
+                self.delete_file(path, bucket_name)
+        except Exception as exc:
+            logger.warning("Error parsing avatar URL '%s' for deletion: %s", url, exc)
 
 
 storage_service = StorageService()
