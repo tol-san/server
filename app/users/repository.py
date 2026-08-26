@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,6 +22,21 @@ class UserRepository:
 
     async def get_by_username(self, db: AsyncSession, username: str) -> Optional[User]:
         stmt = select(User).where(User.username == username.strip()).options(selectinload(User.profile))
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_email_or_username(self, db: AsyncSession, identifier: str) -> Optional[User]:
+        clean_identifier = identifier.strip()
+        stmt = (
+            select(User)
+            .where(
+                or_(
+                    User.email == clean_identifier.lower(),
+                    User.username == clean_identifier.lower(),
+                )
+            )
+            .options(selectinload(User.profile))
+        )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -52,6 +67,13 @@ class UserRepository:
             post_count=0,
         )
         db.add(profile)
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    async def update_password(self, db: AsyncSession, user: User, hashed_password: str) -> User:
+        user.hashed_password = hashed_password
+        db.add(user)
         await db.commit()
         await db.refresh(user)
         return user

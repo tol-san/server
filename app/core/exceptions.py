@@ -17,6 +17,15 @@ class AppException(Exception):
         super().__init__(message)
 
 
+class BadRequestException(AppException):
+    def __init__(self, message: str = "Bad request."):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="BAD_REQUEST",
+        )
+
+
 class EmailAlreadyExistsException(AppException):
     def __init__(self, message: str = "Email is already registered."):
         super().__init__(

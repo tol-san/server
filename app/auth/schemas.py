@@ -50,3 +50,68 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     profile: Optional[ProfileResponse] = None
+
+
+class LoginRequest(BaseModel):
+    identifier: str = Field(
+        ...,
+        min_length=1,
+        description="User email address or username",
+    )
+    password: str = Field(
+        ...,
+        min_length=1,
+        description="User password",
+    )
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(..., description="Active JWT refresh token")
+
+
+class TokenRefreshResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr = Field(..., description="Registered account email address")
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    reset_token: Optional[str] = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., description="Password reset verification token")
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        max_length=100,
+        description="New password (8-100 characters)",
+    )
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., description="Current password")
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        max_length=100,
+        description="New password (8-100 characters)",
+    )
+
+
+class MessageResponse(BaseModel):
+    message: str

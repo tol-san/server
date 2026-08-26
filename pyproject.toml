@@ -14,7 +14,9 @@ dependencies = [
     "fastapi>=0.141.1",
     "pwdlib[argon2]>=0.2.0",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.9.0",
     "python-dotenv>=1.2.3",
+    "redis>=5.2.0",
     "sqlalchemy>=2.0.52",
     "uvicorn[standard]>=0.52.4",
 ]
