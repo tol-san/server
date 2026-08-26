@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth.router import router as auth_router
 from app.core.config import settings
+from app.core.exceptions import register_exception_handlers
 
 
 def create_application() -> FastAPI:
@@ -23,6 +25,12 @@ def create_application() -> FastAPI:
             allow_headers=["*"],
         )
 
+    # Register custom exception handlers
+    register_exception_handlers(application)
+
+    # Include routers
+    application.include_router(auth_router, prefix=settings.API_V1_STR)
+
     @application.get("/", tags=["Health"])
     async def root():
         return {
@@ -38,3 +46,4 @@ def create_application() -> FastAPI:
 
 
 app = create_application()
+
