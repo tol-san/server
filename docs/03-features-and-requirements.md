@@ -129,14 +129,27 @@ Real-time messaging via **FastAPI WebSockets**:
 
 ---
 
-### 3.1.11 Live Room
-FastAPI manages business logic and access control while external services (LiveKit, Agora) handle video streaming:
-- Create live room & generate access tokens
-- Start / join / leave / end live sessions
-- Link Live Room to community and verify host/member permissions
-- Track viewer count and live text comments
+### 3.1.11 Community Group Chat ✅ Implemented (Level 3 — Advanced Reliability)
+Real-time WebSocket community chat with production-grade reliability:
+- **WebSocket Gateway** (`/api/v1/chats/ws/{community_id}`) — ticket-based auth (one-time JWT-issued ticket)
+- **Membership Enforcement** — membership verified on connect; kick/ban instantly closes socket (Redis Pub/Sub control channel)
+- **Idempotent Messages** — `client_message_id` prevents duplicates on mobile retry
+- **Cursor/Keyset Pagination** — history via `GET /chats/{community_id}/messages?before=<cursor>`
+- **Per-User Rate Limiting** — Redis sliding counter (configurable messages/window)
+- **Online Presence** — Redis ZSET/TTL presence manager with multi-device support
+- **Typing Indicators** — ephemeral Redis Pub/Sub (fire-and-forget)
+- **Transactional Outbox** — events committed atomically with messages; outbox relay → Redis Streams
+- **Content Moderation Worker** — ModerationWorker inspects messages, soft-deletes violations
 
-*Note:* Stretch goal for Phase 1. Core API must be completed first.
+### 3.1.12 Live Streaming Rooms ✅ Implemented (Level 3 — Advanced Reliability)
+LiveKit-powered live streaming with reliable metrics and webhook idempotency:
+- **Room Lifecycle** — `READY → LIVE → ENDED` status state machine
+- **LiveKit Token Generation** — host (`can_publish=True`) and viewer (`can_publish=False`) tokens with 1h TTL
+- **Webhook Receiver** — `POST /live-rooms/webhooks/livekit` with JWT signature verification and `provider_events` idempotency table
+- **Real-Time Viewer Tracking** — Redis SET (current) + HyperLogLog (unique) + atomic counters (total joins, peak)
+- **Session Metrics** — live from Redis; persisted to `live_sessions` table on session end
+- **Manual Reconciliation** — `POST /live-rooms/{id}/reconcile` syncs Redis against LiveKit RoomService participant list
+- **Outbox Events** — session_started / session_ended published via transactional outbox for notification and analytics workers
 
 ---
 

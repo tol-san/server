@@ -378,6 +378,21 @@ class CommunityService:
         if not removed:
             raise NotFoundException("User is not a member of this community.")
 
+        # Publish control event so the WS gateway terminates the kicked user's connection
+        try:
+            import json as _json
+            from app.core.redis import get_redis_client
+            r = get_redis_client()
+            control_event = _json.dumps({
+                "type": "membership.revoked",
+                "user_id": str(target_user_id),
+                "community_id": str(community_id),
+                "reason": "kicked",
+            })
+            await r.publish(f"pubsub:chat:{community_id}:control", control_event)
+        except Exception:
+            pass  # Non-critical: DB membership already removed
+
         return {"message": "Member has been removed from the community."}
 
     async def list_join_requests(

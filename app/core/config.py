@@ -65,5 +65,28 @@ class Settings(BaseSettings):
     MEILISEARCH_URL: str = "http://localhost:7700"
     MEILISEARCH_MASTER_KEY: str = "meilisearch_master_key_12345"
 
+    # LiveKit (WebRTC streaming provider)
+    LIVEKIT_URL: str = "ws://localhost:7880"
+    LIVEKIT_API_KEY: str = "devkey"
+    LIVEKIT_API_SECRET: str = "secret"
+
+    # WebSocket Ticket Authentication
+    WS_TICKET_TTL_SECONDS: int = 60
+
+    # Community Chat Rate Limiting
+    CHAT_RATE_LIMIT_MESSAGES: int = 10   # messages allowed per window
+    CHAT_RATE_LIMIT_WINDOW_SECONDS: int = 10
+
+    # Background Workers (Outbox Relay + Stream Consumers)
+    OUTBOX_POLL_INTERVAL_SECONDS: float = 1.0
+    OUTBOX_BATCH_SIZE: int = 50
+    WORKER_MAX_RETRIES: int = 3
+    DEAD_LETTER_AFTER_RETRIES: int = 3
+    WORKER_BLOCK_MS: int = 2000  # Redis Streams BLOCK timeout
+
+    # Observability
+    ENABLE_METRICS: bool = True
+    LOG_FORMAT: str = "json"  # "json" or "text" (text for local dev)
+
 
 settings = Settings()

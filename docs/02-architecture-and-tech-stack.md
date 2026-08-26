@@ -216,3 +216,159 @@ Built into FastAPI:
 - **Swagger UI**: Interactive documentation at `/api/v1/docs`
 - **ReDoc**: Alternative documentation view at `/api/v1/redoc`
 - **OpenAPI schema**: Generated at `/api/v1/openapi.json`
+
+---
+
+## 2.6 Level 3 — Advanced Reliability Architecture
+
+### Real-Time Subsystems
+
+#### Community Group Chat (`/api/v1/chats`)
+
+```text
+Client  →  POST /chats/ws-ticket  (JWT)  →  one-time ticket (60s TTL, stored in Redis)
+Client  →  WSS  /chats/ws/{community_id}?ticket=...
+               ↓
+         Ticket consumed (GETDEL — one-time use)
+               ↓
+         User loaded from DB + membership verified
+               ↓
+         ConnectionManager.connect()  [local registry]
+         PresenceManager.join()       [ZADD ZSET + connection TTL key]
+               ↓
+         WebSocket message loop
+           message.send  →  ChatService.create_message()
+                            ├── Rate limit check (Redis INCR/EXPIRE)
+                            ├── INSERT chat_messages (idempotent on client_message_id)
+                            ├── INSERT outbox_events   ─── same transaction ───
+                            └── COMMIT
+                                ↓
+                            PUBLISH pubsub:chat:{community_id}
+                                ↓
+                            All FastAPI replicas receive via Pub/Sub subscriber task
+                                ↓
+                            broadcast_local() → all local WebSocket connections
+           typing.start/stop → PUBLISH pubsub:chat:{community_id}:typing (ephemeral)
+           heartbeat         → PresenceManager.heartbeat() (ZADD score update)
+         
+         On kick: communities/service.py PUBLISH pubsub:chat:{community_id}:control
+                  → ConnectionManager._handle_control() → terminate_user() → ws.close(1008)
+```
+
+**Presence Model**: Redis ZSET scored by last-seen timestamp + per-connection TTL keys.
+- Multi-device sessions: all connection IDs share the same user entry in the ZSET.
+- Stale entries pruned on read (`ZREMRANGEBYSCORE` entries older than 90s).
+
+**Rate Limiting**: Sliding Redis counter per user (`ratelimit:chat:{user_id}`, TTL=window).
+
+#### Live Streaming Rooms (`/api/v1/live-rooms`)
+
+```text
+Owner  →  POST /live-rooms                    → create room (status=READY)
+Owner  →  POST /live-rooms/{id}/start         → status=LIVE, INSERT live_sessions
+                                                 generate host token (can_publish=True)
+Viewer →  POST /live-rooms/{id}/token         → generate viewer token (can_publish=False)
+                                                 viewer count NOT incremented here
+               ↓
+         LiveKit WebRTC SFU handles media transport
+               ↓
+LiveKit →  POST /live-rooms/webhooks/livekit  (Authorization header — signature verified)
+               ↓
+         WebhookReceiver.receive() → verify JWT
+         provider_events UPSERT    → idempotency check
+               ↓
+         participant_joined → ViewerTracker.participant_joined(session_id, user_id)
+                              SADD participants | PFADD unique (HyperLogLog) | INCR total_joins
+                              Update peak if current SCARD > stored peak
+         participant_left  → ViewerTracker.participant_left()  (SREM)
+         room_finished     → auto-close session, persist metrics, cleanup Redis
+               ↓
+Owner  →  POST /live-rooms/{id}/end           → fetch Redis metrics, UPDATE live_sessions, cleanup
+```
+
+**Viewer Count Source of Truth**:
+- `LIVE` room: real-time from Redis (`SCARD live:{session_id}:participants`)
+- `ENDED` room: historic from `live_sessions.peak_viewers` (PostgreSQL)
+
+**Reconciliation**: `GET /live-rooms/{id}/reconcile` — compares Redis SET against LiveKit `RoomService.list_participants()` and syncs discrepancies.
+
+---
+
+### Transactional Outbox Pattern
+
+Ensures exactly-once event delivery even if the process crashes between DB write and Redis publish.
+
+```text
+Business transaction:
+  BEGIN
+    INSERT chat_messages / UPDATE live_rooms
+    INSERT outbox_events  ← same ACID transaction
+  COMMIT
+        ↓
+Outbox Relay Worker (async loop, every 1s):
+  SELECT ... WHERE published_at IS NULL
+    FOR UPDATE SKIP LOCKED       ← concurrent-safe
+  → XADD stream:chat:events / stream:live:events
+  → UPDATE outbox_events SET published_at = now()
+  → COMMIT
+```
+
+**Streams**:
+| Stream | Events |
+|:---|:---|
+| `stream:chat:events` | `chat.message.created` |
+| `stream:live:events` | `live_room.created`, `live_room.session_started`, `live_room.session_ended` |
+| `stream:general:events` | All other aggregate types |
+
+---
+
+### Redis Streams Consumer Workers
+
+All workers extend `BaseStreamConsumer` which provides:
+- **Consumer Groups** (`XREADGROUP`) — parallel processing across replicas
+- **Retry**: failed events re-published with `_retry_count` incremented
+- **Dead-letter**: after `WORKER_MAX_RETRIES`, event written to `dead_letter_events` (PostgreSQL)
+- **Prometheus**: per-worker event counters, processing time histograms, dead-letter counters
+
+| Worker | Stream | Responsibility |
+|:---|:---|:---|
+| `OutboxRelayWorker` | DB poll | Relay outbox → Redis Streams |
+| `ChatNotificationWorker` | `stream:chat:events` | @mention / reply notifications |
+| `LiveNotificationWorker` | `stream:live:events` | Notify community members on live start |
+| `ChatAnalyticsWorker` | `stream:chat:events` | Increment community message counts |
+| `LiveAnalyticsWorker` | `stream:live:events` | Log session metrics |
+| `ModerationWorker` | `stream:chat:events` | Content policy check, soft-delete violations |
+
+---
+
+### Observability
+
+#### Prometheus Metrics (exposed at `GET /metrics`)
+
+| Metric | Type | Description |
+|:---|:---|:---|
+| `http_request_duration_seconds` | Histogram | Per-endpoint HTTP latency |
+| `http_requests_total` | Counter | Total HTTP requests |
+| `chat_messages_total` | Counter | Messages per community |
+| `chat_ws_connections_active` | Gauge | Live WebSocket connections |
+| `chat_messages_rate_limited_total` | Counter | Rate-limited message rejections |
+| `live_sessions_total` | Counter | Live sessions started |
+| `live_viewers_current` | Gauge | Current viewers per session |
+| `live_tokens_issued_total` | Counter | LiveKit tokens issued (host/viewer) |
+| `worker_events_processed_total` | Counter | Events processed per worker |
+| `worker_events_failed_total` | Counter | Failed events per worker |
+| `worker_event_processing_duration_seconds` | Histogram | Worker processing time |
+| `outbox_events_pending` | Gauge | Unpublished outbox events |
+| `dead_letter_events_total` | Counter | Events sent to dead-letter |
+
+#### Structured Logging
+
+JSON-formatted logs (via `python-json-logger`) with injected `trace_id` field from `ObservabilityMiddleware`.
+
+#### Distributed Tracing
+
+`ObservabilityMiddleware` propagates `X-Trace-ID` header:
+- Reads existing `X-Trace-ID` header if present (from upstream caller)
+- Generates new UUID if absent
+- Injects `trace_id` into all log records via `TraceFilter`
+- Echoes `X-Trace-ID` in every response header for client correlation
