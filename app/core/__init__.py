@@ -21,6 +21,7 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
+from app.core.storage import StorageService, storage_service
 
 __all__ = [
     "settings",
@@ -36,6 +37,8 @@ __all__ = [
     "blacklist_token",
     "is_token_blacklisted",
     "get_redis_client",
+    "StorageService",
+    "storage_service",
     "AppException",
     "BadRequestException",
     "EmailAlreadyExistsException",

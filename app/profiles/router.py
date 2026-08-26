@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_active_user
@@ -30,7 +30,7 @@ async def get_my_profile(
     response_model=CurrentUserProfileResponse,
     status_code=status.HTTP_200_OK,
     summary="Update current user profile",
-    description="Update display name, bio, and avatar for the authenticated user.",
+    description="Update display name, bio, and avatar URL for the authenticated user.",
 )
 async def update_my_profile(
     payload: ProfileUpdateRequest,
@@ -39,3 +39,19 @@ async def update_my_profile(
     service: ProfileService = Depends(lambda: profile_service),
 ) -> CurrentUserProfileResponse:
     return await service.update_current_profile(db, current_user, payload)
+
+
+@router.post(
+    "/me/avatar",
+    response_model=CurrentUserProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload user avatar image",
+    description="Upload an avatar image (JPEG, PNG, WebP, GIF, max 5MB) to MinIO object storage and update profile.",
+)
+async def upload_avatar(
+    file: UploadFile = File(..., description="Avatar image file to upload"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: ProfileService = Depends(lambda: profile_service),
+) -> CurrentUserProfileResponse:
+    return await service.upload_avatar(db, current_user, file)
