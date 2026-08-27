@@ -1,0 +1,27 @@
+{
+  "name": "GenZ Media Flutter Frontend Documentation v2",
+  "generated_from": [
+    "docs.zip/docs/01-overview.md",
+    "docs.zip/docs/02-architecture-and-tech-stack.md",
+    "docs.zip/docs/03-features-and-requirements.md",
+    "docs.zip/docs/04-database-design.md",
+    "docs.zip/docs/05-api-specification.md",
+    "docs.zip/docs/06-roadmap.md",
+    "deep-research-report.md"
+  ],
+  "file_count_markdown": 34,
+  "primary_navigation": [
+    "Home",
+    "Shorts",
+    "Create",
+    "Discover",
+    "Profile"
+  ],
+  "latest_backend_scope_includes": [
+    "Search",
+    "Notifications",
+    "Reports/Moderation",
+    "Community Chat (documented implemented)",
+    "Live Rooms (documented implemented)"
+  ]
+}
