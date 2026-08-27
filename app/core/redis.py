@@ -20,6 +20,7 @@ def get_redis_client() -> aioredis.Redis:
             settings.REDIS_URL,
             decode_responses=True,
             socket_connect_timeout=2.0,
+            socket_timeout=5.0,
         )
     return redis_client
 

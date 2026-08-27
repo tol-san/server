@@ -64,6 +64,7 @@ def get_meilisearch_client() -> AsyncClient:
         meilisearch_client = AsyncClient(
             url=settings.MEILISEARCH_URL,
             api_key=settings.MEILISEARCH_MASTER_KEY,
+            timeout=5,
             custom_headers={"User-Agent": f"GenZ-Media-API/{settings.VERSION}"},
         )
     return meilisearch_client

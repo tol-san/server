@@ -44,7 +44,7 @@ class FeedService:
         limit: int = 20,
         offset: int = 0,
     ) -> PaginatedPostsResponse:
-        cache_key = f"cache:feed:discover:{limit}:{offset}"
+        cache_key = f"cache:feed:discover:{current_user.id}:{limit}:{offset}"
         cached_data = await cache_service.get(cache_key)
         if cached_data:
             return PaginatedPostsResponse.model_validate(cached_data)

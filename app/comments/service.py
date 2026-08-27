@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,8 @@ from app.comments.schemas import (
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.posts.repository import PostRepository, post_repository
 from app.users.models import User
+
+logger = logging.getLogger(__name__)
 
 
 def map_comment_to_response(comment: Comment) -> CommentResponse:
@@ -76,28 +79,31 @@ class CommentService:
         )
 
         from app.notifications.service import notification_service
-        if payload.parent_id and parent_comment.user_id != current_user.id:
-            await notification_service.notify_user(
-                db,
-                recipient_id=parent_comment.user_id,
-                actor_id=current_user.id,
-                notification_type="comment_reply",
-                title="New Reply",
-                message=f"{current_user.username} replied to your comment.",
-                entity_type="comment",
-                entity_id=comment.id,
-            )
-        elif not payload.parent_id and post.author_id != current_user.id:
-            await notification_service.notify_user(
-                db,
-                recipient_id=post.author_id,
-                actor_id=current_user.id,
-                notification_type="post_comment",
-                title="New Comment",
-                message=f"{current_user.username} commented on your post.",
-                entity_type="comment",
-                entity_id=comment.id,
-            )
+        try:
+            if payload.parent_id and parent_comment.user_id != current_user.id:
+                await notification_service.notify_user(
+                    db,
+                    recipient_id=parent_comment.user_id,
+                    actor_id=current_user.id,
+                    notification_type="comment_reply",
+                    title="New Reply",
+                    message=f"{current_user.username} replied to your comment.",
+                    entity_type="comment",
+                    entity_id=comment.id,
+                )
+            elif not payload.parent_id and post.author_id != current_user.id:
+                await notification_service.notify_user(
+                    db,
+                    recipient_id=post.author_id,
+                    actor_id=current_user.id,
+                    notification_type="post_comment",
+                    title="New Comment",
+                    message=f"{current_user.username} commented on your post.",
+                    entity_type="comment",
+                    entity_id=comment.id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to dispatch comment notification (non-fatal): %s", exc)
 
         return map_comment_to_response(comment)
 
