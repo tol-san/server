@@ -1,6 +1,6 @@
 import uuid
-from typing import Optional, Sequence
-from sqlalchemy import delete, func, select
+from typing import Optional, Sequence, Union
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.interests.models import Interest, UserInterest
@@ -23,6 +23,38 @@ class InterestRepository:
         if not interest_ids:
             return []
         stmt = select(Interest).where(Interest.id.in_(interest_ids))
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    async def get_by_slugs_or_ids(
+        self, db: AsyncSession, identifiers: Sequence[Union[uuid.UUID, str]]
+    ) -> Sequence[Interest]:
+        if not identifiers:
+            return []
+
+        uuid_list = []
+        slug_list = []
+        for item in identifiers:
+            if isinstance(item, uuid.UUID):
+                uuid_list.append(item)
+            else:
+                s = str(item).strip()
+                try:
+                    uuid_list.append(uuid.UUID(s))
+                except ValueError:
+                    slug_list.append(s.lower())
+
+        conditions = []
+        if uuid_list:
+            conditions.append(Interest.id.in_(uuid_list))
+        if slug_list:
+            conditions.append(func.lower(Interest.slug).in_(slug_list))
+            conditions.append(func.lower(Interest.name).in_(slug_list))
+
+        if not conditions:
+            return []
+
+        stmt = select(Interest).where(or_(*conditions))
         result = await db.execute(stmt)
         return result.scalars().all()
 

@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,10 +21,10 @@ class InterestCreateRequest(BaseModel):
 
 
 class UserInterestsUpdateRequest(BaseModel):
-    interest_ids: List[uuid.UUID] = Field(
+    interest_ids: List[Union[uuid.UUID, str]] = Field(
         ...,
         max_length=20,
-        description="List of selected interest UUIDs (max 20)",
+        description="List of selected interest UUIDs, slugs, or names (max 20)",
     )
 
 

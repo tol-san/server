@@ -150,6 +150,38 @@ async def test_user_interests_lifecycle(async_client: AsyncClient, authenticated
 
 
 @pytest.mark.asyncio
+async def test_update_user_interests_by_slug(async_client: AsyncClient, authenticated_user: dict, superuser: dict):
+    # 1. Create categories with known slugs
+    await async_client.post(
+        "/api/v1/interests",
+        headers=superuser["headers"],
+        json={"name": "Art & Design", "slug": "art-design"},
+    )
+    await async_client.post(
+        "/api/v1/interests",
+        headers=superuser["headers"],
+        json={"name": "Fashion & Lifestyle", "slug": "fashion-lifestyle"},
+    )
+    await async_client.post(
+        "/api/v1/interests",
+        headers=superuser["headers"],
+        json={"name": "Food & Cooking", "slug": "food-cooking"},
+    )
+
+    # 2. Update interests using slugs (such as what mobile frontend sends)
+    response = await async_client.put(
+        "/api/v1/profiles/me/interests",
+        headers=authenticated_user["headers"],
+        json={"interest_ids": ["art-design", "fashion-lifestyle", "food-cooking"]},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    slugs = {item["slug"] for item in data["items"]}
+    assert slugs == {"art-design", "fashion-lifestyle", "food-cooking"}
+
+
+@pytest.mark.asyncio
 async def test_update_user_interests_invalid_id(async_client: AsyncClient, authenticated_user: dict):
     fake_id = str(uuid.uuid4())
     response = await async_client.put(

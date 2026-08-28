@@ -86,16 +86,37 @@ class InterestService:
         user_id: uuid.UUID,
         payload: UserInterestsUpdateRequest,
     ) -> UserInterestsResponse:
-        unique_ids = list(dict.fromkeys(payload.interest_ids))
+        raw_items = payload.interest_ids
+        if not raw_items:
+            updated_interests = await self.interest_repo.set_user_interests(db, user_id, [])
+            items = [InterestResponse.model_validate(i) for i in updated_interests]
+            return UserInterestsResponse(items=items, total=0)
 
-        # Validate that all requested interest IDs exist
-        if unique_ids:
-            found_interests = await self.interest_repo.get_by_ids(db, unique_ids)
-            if len(found_interests) != len(unique_ids):
-                found_ids = {i.id for i in found_interests}
-                missing = [str(uid) for uid in unique_ids if uid not in found_ids]
-                raise BadRequestException(f"Invalid interest ID(s) provided: {', '.join(missing)}")
+        # Lookup interests by ID, slug, or name
+        found_interests = await self.interest_repo.get_by_slugs_or_ids(db, raw_items)
 
+        found_by_id = {str(i.id).lower(): i.id for i in found_interests}
+        found_by_slug = {i.slug.lower(): i.id for i in found_interests}
+        found_by_name = {i.name.lower(): i.id for i in found_interests}
+
+        final_uuid_ids = []
+        missing = []
+        for raw in raw_items:
+            raw_str = str(raw).strip()
+            raw_lower = raw_str.lower()
+            if raw_lower in found_by_id:
+                final_uuid_ids.append(found_by_id[raw_lower])
+            elif raw_lower in found_by_slug:
+                final_uuid_ids.append(found_by_slug[raw_lower])
+            elif raw_lower in found_by_name:
+                final_uuid_ids.append(found_by_name[raw_lower])
+            else:
+                missing.append(raw_str)
+
+        if missing:
+            raise BadRequestException(f"Invalid interest ID(s) provided: {', '.join(missing)}")
+
+        unique_ids = list(dict.fromkeys(final_uuid_ids))
         updated_interests = await self.interest_repo.set_user_interests(db, user_id, unique_ids)
 
         # Invalidate recommendation & shorts cache for this user
