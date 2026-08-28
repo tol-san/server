@@ -48,6 +48,7 @@ class UserRepository:
         username: str,
         hashed_password: str,
         display_name: Optional[str] = None,
+        avatar_url: Optional[str] = None,
     ) -> User:
         user = User(
             email=email.lower().strip(),
@@ -59,9 +60,12 @@ class UserRepository:
         db.add(user)
         await db.flush()  # Flush to generate user.id
 
+        default_avatar = avatar_url or f"https://api.dicebear.com/7.x/critters/png?seed={username.strip()}"
+
         profile = Profile(
             user_id=user.id,
             display_name=display_name.strip() if display_name else user.username,
+            avatar_url=default_avatar,
             follower_count=0,
             following_count=0,
             post_count=0,
