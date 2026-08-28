@@ -26,7 +26,7 @@ async def store_password_reset_otp(
     email: str,
     user_id: uuid.UUID,
     otp: str,
-    expire_seconds: int = 900,  # 15 minutes default
+    expire_seconds: int = 300,  # 5 minutes default
 ) -> None:
     """
     Store 6-digit OTP in Redis with expiration time.
@@ -106,4 +106,70 @@ async def verify_password_reset_otp(
         return None
     except Exception as exc:
         logger.warning("[OTP] Redis verify check failed: %s", exc)
+        return None
+
+
+async def store_signup_otp(
+    email: str,
+    hashed_password: str,
+    otp: str,
+    expire_seconds: int = 300,  # 5 minutes default
+) -> None:
+    """
+    Store 6-digit OTP for pending user registration in Redis.
+    Holds email, hashed_password, and OTP.
+    """
+    clean_email = email.lower().strip()
+    data = {
+        "otp": otp,
+        "email": clean_email,
+        "hashed_password": hashed_password,
+    }
+
+    try:
+        client: aioredis.Redis = get_redis_client()
+        await client.set(
+            f"otp:signup:{clean_email}",
+            json.dumps(data),
+            ex=expire_seconds,
+        )
+        logger.debug("[OTP] Stored signup OTP in Redis for %s (TTL: %ds)", clean_email, expire_seconds)
+    except Exception as exc:
+        logger.warning("[OTP] Redis store failed for signup, falling back to memory: %s", exc)
+        _in_memory_otp[f"signup:{clean_email}"] = (data, time.time() + expire_seconds)
+
+
+async def verify_signup_otp(
+    email: str,
+    otp: str,
+) -> Optional[dict]:
+    """
+    Verify the 6-digit signup OTP for the given email address.
+    If valid, consumes the OTP and returns the dict with 'email' and 'hashed_password'.
+    """
+    clean_email = email.lower().strip()
+    clean_otp = otp.strip()
+
+    # 1. Check in-memory fallback
+    mem_key = f"signup:{clean_email}"
+    if mem_key in _in_memory_otp:
+        data, expires_at = _in_memory_otp[mem_key]
+        if time.time() < expires_at and data.get("otp") == clean_otp:
+            del _in_memory_otp[mem_key]
+            return data
+
+    # 2. Check Redis
+    try:
+        client: aioredis.Redis = get_redis_client()
+        raw_data = await client.get(f"otp:signup:{clean_email}")
+        if not raw_data:
+            return None
+
+        data = json.loads(raw_data)
+        if data.get("otp") == clean_otp:
+            await client.delete(f"otp:signup:{clean_email}")
+            return data
+        return None
+    except Exception as exc:
+        logger.warning("[OTP] Redis signup verify failed: %s", exc)
         return None

@@ -1,3 +1,5 @@
+import re
+import secrets
 import time
 import uuid
 from typing import Optional
@@ -25,7 +27,9 @@ from app.core.exceptions import (
 from app.core.otp import (
     generate_otp,
     store_password_reset_otp,
+    store_signup_otp,
     verify_password_reset_otp,
+    verify_signup_otp,
 )
 from app.core.redis import blacklist_token, is_token_blacklisted
 from app.core.security import (
@@ -46,47 +50,191 @@ class AuthService:
     def __init__(self, user_repo: UserRepository = user_repository):
         self.user_repo = user_repo
 
+    async def generate_unique_username(self, db: AsyncSession, email: str) -> str:
+        """
+        Derive a clean, unique alphanumeric username from the email prefix.
+        Appends incremental counters or random numbers if collisions occur.
+        """
+        prefix = email.split("@")[0].lower().strip()
+        cleaned = re.sub(r"[^a-z0-9_]", "_", prefix)
+        cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+        if len(cleaned) < 3:
+            cleaned = f"user_{cleaned}" if cleaned else "user"
+        base = cleaned[:24]
+
+        # 1. Check if base username is available
+        if not await self.user_repo.get_by_username(db, base):
+            return base
+
+        # 2. Try incremental suffixes base1 .. base9
+        for i in range(1, 10):
+            candidate = f"{base}{i}"
+            if not await self.user_repo.get_by_username(db, candidate):
+                return candidate
+
+        # 3. Append random 4-digit unique suffix
+        for _ in range(50):
+            rand_suffix = secrets.randbelow(9000) + 1000
+            candidate = f"{base[:20]}_{rand_suffix}"
+            if not await self.user_repo.get_by_username(db, candidate):
+                return candidate
+
+        return f"user_{uuid.uuid4().hex[:8]}"
+
+    async def check_username_available(self, db: AsyncSession, username: str) -> bool:
+        """Check if a candidate username is available in PostgreSQL."""
+        clean_username = username.lower().strip()
+        user = await self.user_repo.get_by_username(db, clean_username)
+        return user is None
+
+    async def request_signup_otp(
+        self,
+        db: AsyncSession,
+        email: str,
+        password: str,
+    ) -> tuple[str, str]:
+        """
+        Initiate two-step signup by hashing password, generating 6-digit OTP,
+        and storing in Redis for 5 minutes.
+        """
+        clean_email = email.lower().strip()
+        existing_user = await self.user_repo.get_by_email(db, clean_email)
+        if existing_user:
+            raise EmailAlreadyExistsException("A user with this email already exists.")
+
+        hashed_password = get_password_hash(password)
+        otp = generate_otp()
+        await store_signup_otp(
+            clean_email,
+            hashed_password,
+            otp,
+            expire_seconds=settings.SIGNUP_OTP_EXPIRE_MINUTES * 60,
+        )
+        return otp, clean_email
+
+    async def verify_signup_otp_and_create_user(
+        self,
+        db: AsyncSession,
+        email: str,
+        otp: str,
+    ) -> TokenResponse:
+        """
+        Verify signup OTP from Redis, generate unique username, create user and profile in DB,
+        and issue JWT token pair.
+        """
+        clean_email = email.lower().strip()
+        existing_user = await self.user_repo.get_by_email(db, clean_email)
+        if existing_user:
+            raise EmailAlreadyExistsException("A user with this email already exists.")
+
+        data = await verify_signup_otp(clean_email, otp)
+        if not data:
+            raise BadRequestException("Invalid or expired verification code.")
+
+        hashed_password = data.get("hashed_password")
+        if not hashed_password:
+            raise BadRequestException("Signup session expired or corrupted. Please sign up again.")
+
+        username = await self.generate_unique_username(db, clean_email)
+
+        # Derive initial default display name from email prefix
+        raw_prefix = clean_email.split("@")[0]
+        display_name = re.sub(r"[._-]+", " ", raw_prefix).strip().title()
+        if not display_name:
+            display_name = username
+
+        user = await self.user_repo.create_user_with_profile(
+            db,
+            email=clean_email,
+            username=username,
+            hashed_password=hashed_password,
+            display_name=display_name,
+        )
+
+        # Index user into Meilisearch
+        try:
+            from app.core.meilisearch import meilisearch_service
+            await meilisearch_service.index_user(
+                {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "display_name": user.profile.display_name if user.profile else user.username,
+                    "avatar_url": user.profile.avatar_url if user.profile else None,
+                    "bio": user.profile.bio if user.profile else None,
+                    "follower_count": 0,
+                    "is_active": user.is_active,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                }
+            )
+        except Exception:
+            pass
+
+        access_token = create_access_token(user.id)
+        refresh_token, _ = create_refresh_token(user.id)
+
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user=UserResponse.model_validate(user),
+        )
+
     async def register_user(
         self,
         db: AsyncSession,
         payload: UserRegisterRequest,
     ) -> User:
+        clean_email = payload.email.lower().strip()
         # Check if email is already taken
-        existing_user_by_email = await self.user_repo.get_by_email(db, payload.email)
+        existing_user_by_email = await self.user_repo.get_by_email(db, clean_email)
         if existing_user_by_email:
             raise EmailAlreadyExistsException("A user with this email already exists.")
 
-        # Check if username is already taken
-        existing_user_by_username = await self.user_repo.get_by_username(db, payload.username)
-        if existing_user_by_username:
-            raise UsernameAlreadyExistsException("A user with this username already exists.")
+        # If username is omitted, auto-generate unique username
+        if payload.username:
+            clean_username = payload.username.lower().strip()
+            existing_user_by_username = await self.user_repo.get_by_username(db, clean_username)
+            if existing_user_by_username:
+                raise UsernameAlreadyExistsException("A user with this username already exists.")
+            username = clean_username
+        else:
+            username = await self.generate_unique_username(db, clean_email)
 
         # Hash password securely
         hashed_password = get_password_hash(payload.password)
 
+        display_name = payload.display_name or (payload.username if payload.username else None)
+        if not display_name:
+            raw_prefix = clean_email.split("@")[0]
+            display_name = re.sub(r"[._-]+", " ", raw_prefix).strip().title()
+
         # Create user with profile
         user = await self.user_repo.create_user_with_profile(
             db,
-            email=payload.email,
-            username=payload.username,
+            email=clean_email,
+            username=username,
             hashed_password=hashed_password,
-            display_name=payload.display_name,
+            display_name=display_name,
         )
 
         # Index user into Meilisearch
-        from app.core.meilisearch import meilisearch_service
-        await meilisearch_service.index_user(
-            {
-                "id": str(user.id),
-                "username": user.username,
-                "display_name": user.profile.display_name if user.profile else user.username,
-                "avatar_url": user.profile.avatar_url if user.profile else None,
-                "bio": user.profile.bio if user.profile else None,
-                "follower_count": 0,
-                "is_active": user.is_active,
-                "created_at": user.created_at.isoformat() if user.created_at else None,
-            }
-        )
+        try:
+            from app.core.meilisearch import meilisearch_service
+            await meilisearch_service.index_user(
+                {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "display_name": user.profile.display_name if user.profile else user.username,
+                    "avatar_url": user.profile.avatar_url if user.profile else None,
+                    "bio": user.profile.bio if user.profile else None,
+                    "follower_count": 0,
+                    "is_active": user.is_active,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                }
+            )
+        except Exception:
+            pass
 
         return user
 

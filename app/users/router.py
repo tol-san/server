@@ -12,9 +12,27 @@ from app.users.schemas import (
     RelationshipResponse,
     UserPublicResponse,
 )
+from app.auth.schemas import CheckUsernameResponse
+from app.auth.service import AuthService, auth_service
 from app.users.service import UserService, user_service
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+@router.get(
+    "/check-username",
+    response_model=CheckUsernameResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Check username availability",
+    description="Check whether a given candidate username is currently available or already taken.",
+)
+async def check_username(
+    username: str = Query(..., min_length=3, max_length=30, description="Username candidate to test"),
+    db: AsyncSession = Depends(get_db),
+    service: AuthService = Depends(lambda: auth_service),
+) -> CheckUsernameResponse:
+    is_available = await service.check_username_available(db, username)
+    return CheckUsernameResponse(available=is_available, username=username.lower().strip())
 
 
 @router.get(

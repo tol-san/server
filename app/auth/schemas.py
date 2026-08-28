@@ -6,12 +6,12 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 class UserRegisterRequest(BaseModel):
     email: EmailStr = Field(..., description="Valid email address")
-    username: str = Field(
-        ...,
+    username: Optional[str] = Field(
+        default=None,
         min_length=3,
         max_length=30,
         pattern=r"^[a-z0-9_-]+$",
-        description="Username must be 3-30 characters (lowercase letters, numbers, underscores, and hyphens only)",
+        description="Optional username (auto-generated if not provided)",
     )
     password: str = Field(
         ...,
@@ -22,8 +22,40 @@ class UserRegisterRequest(BaseModel):
     display_name: Optional[str] = Field(
         default=None,
         max_length=100,
-        description="Optional display name (defaults to username if not provided)",
+        description="Optional display name (defaults to email prefix if not provided)",
     )
+
+
+class SignupOtpRequest(BaseModel):
+    email: EmailStr = Field(..., description="Valid email address")
+    password: str = Field(
+        ...,
+        min_length=8,
+        max_length=100,
+        description="Password must be between 8 and 100 characters",
+    )
+
+
+class SignupOtpResponse(BaseModel):
+    message: str
+    email: EmailStr
+    expires_in: int = 300
+
+
+class SignupVerifyOtpRequest(BaseModel):
+    email: EmailStr = Field(..., description="Email address submitted during signup")
+    otp: str = Field(
+        ...,
+        min_length=6,
+        max_length=6,
+        validation_alias=AliasChoices("otp", "token", "code"),
+        description="6-digit verification code",
+    )
+
+
+class CheckUsernameResponse(BaseModel):
+    available: bool
+    username: str
 
 
 class ProfileResponse(BaseModel):

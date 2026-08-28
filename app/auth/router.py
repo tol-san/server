@@ -6,12 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_user
 from app.auth.schemas import (
     ChangePasswordRequest,
+    CheckUsernameResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     LoginRequest,
     MessageResponse,
     RefreshTokenRequest,
     ResetPasswordRequest,
+    SignupOtpRequest,
+    SignupOtpResponse,
+    SignupVerifyOtpRequest,
     TokenRefreshResponse,
     TokenResponse,
     UserRegisterRequest,
@@ -22,10 +26,51 @@ from app.auth.schemas import (
 from app.auth.service import AuthService, auth_service
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.email import send_password_reset_email, send_password_reset_otp_email
+from app.core.email import (
+    send_password_reset_email,
+    send_password_reset_otp_email,
+    send_signup_otp_email,
+)
 from app.users.models import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+@router.post(
+    "/register/request-otp",
+    response_model=SignupOtpResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Request registration OTP code",
+    description="Initiate two-step signup by sending a 6-digit verification code to the specified email address.",
+)
+async def request_signup_otp(
+    payload: SignupOtpRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    service: AuthService = Depends(lambda: auth_service),
+) -> SignupOtpResponse:
+    otp, clean_email = await service.request_signup_otp(db, payload.email, payload.password)
+    background_tasks.add_task(send_signup_otp_email, clean_email, otp)
+    return SignupOtpResponse(
+        message="Verification code sent to your email address.",
+        email=clean_email,
+        expires_in=settings.SIGNUP_OTP_EXPIRE_MINUTES * 60,
+    )
+
+
+@router.post(
+    "/register/verify-otp",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Verify registration OTP and create account",
+    description="Verify the 6-digit signup OTP code, generate unique username, create user and profile in database, and issue session tokens.",
+)
+async def verify_signup_otp(
+    payload: SignupVerifyOtpRequest,
+    db: AsyncSession = Depends(get_db),
+    service: AuthService = Depends(lambda: auth_service),
+) -> TokenResponse:
+    return await service.verify_signup_otp_and_create_user(db, payload.email, payload.otp)
 
 
 @router.post(

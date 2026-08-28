@@ -5,6 +5,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ProfileUpdateRequest(BaseModel):
+    username: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=30,
+        pattern=r"^[a-z0-9_-]+$",
+        description="Unique username (3-30 lowercase letters, numbers, underscores, hyphens)",
+    )
     display_name: Optional[str] = Field(
         default=None,
         min_length=1,

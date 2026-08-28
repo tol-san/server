@@ -1,6 +1,7 @@
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import UsernameAlreadyExistsException
 from app.core.storage import storage_service
 from app.profiles.schemas import CurrentUserProfileResponse, ProfileUpdateRequest
 from app.users.models import User
@@ -41,6 +42,16 @@ class ProfileService:
         payload: ProfileUpdateRequest,
     ) -> CurrentUserProfileResponse:
         updates = payload.model_dump(exclude_unset=True)
+
+        if "username" in updates and updates["username"]:
+            new_username = updates.pop("username").lower().strip()
+            if new_username != current_user.username.lower():
+                existing = await self.user_repo.get_by_username(db, new_username)
+                if existing and existing.id != current_user.id:
+                    raise UsernameAlreadyExistsException("This username is already taken.")
+                current_user.username = new_username
+                db.add(current_user)
+
         profile = await self.user_repo.update_profile(
             db,
             current_user,

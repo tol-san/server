@@ -260,3 +260,99 @@ async def send_password_reset_otp_email(
         text_content=text_content,
     )
 
+
+async def send_signup_otp_email(
+    to_email: str,
+    otp: str,
+    username: Optional[str] = None,
+) -> bool:
+    """
+    Compose and send a 6-digit verification code email for new account registration.
+    """
+    greeting_name = f"Hi {username}," if username else "Welcome!"
+    subject = f"{otp} is your GenZ Media verification code"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{subject}</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; -webkit-font-smoothing: antialiased;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f9fafb; padding: 48px 16px;">
+            <tr>
+                <td align="center">
+                    <table role="presentation" width="100%" style="max-width: 460px; background-color: #ffffff; border-radius: 12px; padding: 40px 36px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);">
+                        <!-- Brand Wordmark -->
+                        <tr>
+                            <td style="padding-bottom: 28px;">
+                                <span style="font-size: 20px; font-weight: 800; letter-spacing: -0.5px; color: #061A33;">
+                                    Gen<span style="color: #F20518;">Z</span> Media
+                                </span>
+                            </td>
+                        </tr>
+                        <!-- Heading -->
+                        <tr>
+                            <td style="padding-bottom: 16px;">
+                                <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: #111827; letter-spacing: -0.3px;">
+                                    Confirm Your Email
+                                </h1>
+                            </td>
+                        </tr>
+                        <!-- Body -->
+                        <tr>
+                            <td style="padding-bottom: 24px;">
+                                <p style="margin: 0 0 14px; font-size: 15px; line-height: 24px; color: #374151;">
+                                    {greeting_name}
+                                </p>
+                                <p style="margin: 0; font-size: 15px; line-height: 24px; color: #374151;">
+                                    Enter the following 6-digit code in the GenZ Media app to create and activate your account:
+                                </p>
+                            </td>
+                        </tr>
+                        <!-- OTP Code Card -->
+                        <tr>
+                            <td style="padding-bottom: 28px;">
+                                <div style="background-color: #f8fafc; border-radius: 10px; padding: 18px 24px; text-align: center; border: 1px solid #e2e8f0;">
+                                    <span style="font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #061A33; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', Roboto, monospace;">
+                                        {otp}
+                                    </span>
+                                </div>
+                            </td>
+                        </tr>
+                        <!-- Expiration & Disclaimer -->
+                        <tr>
+                            <td style="border-top: 1px solid #f3f4f6; padding-top: 24px;">
+                                <p style="margin: 0 0 8px; font-size: 13px; line-height: 20px; color: #6b7280;">
+                                    This code will expire in {settings.SIGNUP_OTP_EXPIRE_MINUTES} minutes.
+                                </p>
+                                <p style="margin: 0; font-size: 13px; line-height: 20px; color: #9ca3af;">
+                                    If you didn't attempt to sign up for GenZ Media, you can safely ignore this email. Never share this code with anyone.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    text_content = (
+        f"{greeting_name}\n\n"
+        f"Your GenZ Media verification code is: {otp}\n\n"
+        f"Enter this 6-digit code in the app to complete your registration.\n"
+        f"This code will expire in {settings.SIGNUP_OTP_EXPIRE_MINUTES} minutes.\n"
+        f"If you didn't request this code, you can safely ignore this email."
+    )
+
+    return await send_email(
+        to_email=to_email,
+        subject=subject,
+        html_content=html_content,
+        text_content=text_content,
+    )
+
