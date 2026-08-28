@@ -10,13 +10,6 @@ This repository (`server/`) contains the FastAPI backend for GenZ Media.
 - **Search**: Meilisearch
 - **Live Streaming**: LiveKit
 
-## Core Authentication & User Endpoints
-- `POST /api/v1/auth/register/request-otp`: Sends 6-digit OTP to user's real email (5-minute expiration).
-- `POST /api/v1/auth/register/verify-otp`: Validates signup OTP, auto-generates unique username from email prefix, creates user & profile in PostgreSQL, and returns JWT tokens.
-- `GET /api/v1/users/check-username?username=...`: Real-time username availability checker.
-- `PATCH /api/v1/profiles/me`: Updates profile (display name, bio, avatar, and unique username).
-- `POST /api/v1/auth/forgot-password` & `POST /api/v1/auth/verify-otp`: Password reset OTP verification flow (5-minute expiration).
-
 ---
 
 ## Active & Available MCP Tools

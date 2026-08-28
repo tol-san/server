@@ -37,17 +37,21 @@
 ### Authentication (`/api/v1/auth`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/v1/auth/register` | Register new user account |
+| `POST` | `/api/v1/auth/register/request-otp` | Request 6-digit email registration OTP (5-min TTL) |
+| `POST` | `/api/v1/auth/register/verify-otp` | Verify registration OTP, auto-generate unique username, and create user |
+| `POST` | `/api/v1/auth/register` | Direct user registration (legacy) |
 | `POST` | `/api/v1/auth/login` | Login and obtain access + refresh tokens |
 | `POST` | `/api/v1/auth/refresh` | Refresh expired access token |
-| `POST` | `/api/v1/auth/logout` | Revoke active refresh token |
-| `POST` | `/api/v1/auth/forgot-password` | Request password reset token via email |
+| `POST` | `/api/v1/auth/logout` | Revoke active refresh token and session |
+| `POST` | `/api/v1/auth/forgot-password` | Request password reset OTP via email (5-min TTL) |
+| `POST` | `/api/v1/auth/verify-otp` | Verify password reset OTP code |
 | `POST` | `/api/v1/auth/reset-password` | Reset password using verified token |
 | `POST` | `/api/v1/auth/change-password` | Change password for authenticated user |
 
 ### Users & Profiles (`/api/v1/users`, `/api/v1/profiles`)
 | Method | Path | Description |
 | --- | --- | --- |
+| `GET` | `/api/v1/users/check-username` | Check real-time username availability (`?username=...`) |
 | `GET` | `/api/v1/users/{username}` | Get public user profile |
 | `GET` | `/api/v1/users/{user_id}/followers` | List user's followers |
 | `GET` | `/api/v1/users/{user_id}/following` | List users being followed |

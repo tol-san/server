@@ -4,15 +4,11 @@
 
 ### 3.1.1 Authentication
 The authentication system supports:
-- Register
-- Login
-- Logout
-- Email verification
-- Forgot Password & Reset Password
-- JWT Access Token & Refresh Token
-- Change Password
-
-Authentication uses JWT-based access and refresh tokens.
+- **Two-Step Email Registration**: Client requests 6-digit OTP to real email (`/auth/register/request-otp`), verifies code (`/auth/register/verify-otp`), and receives authenticated session with auto-generated unique username derived from email.
+- **Username Availability Verification**: Real-time validation endpoint (`/users/check-username`) ensuring unique username selection before updating profiles.
+- **Login & Token Lifecycle**: Login (`/auth/login`), Token Refresh (`/auth/refresh`), and Logout (`/auth/logout`) using JWT access tokens and secure refresh tokens.
+- **Password Reset**: Email-delivered 6-digit reset OTP (5-minute TTL) with verified token reset (`/auth/forgot-password`, `/auth/verify-otp`, `/auth/reset-password`).
+- **Change Password**: Authenticated password updates (`/auth/change-password`).
 
 ---
 
