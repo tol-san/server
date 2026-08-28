@@ -84,7 +84,7 @@ async def test_forgot_password_endpoint_triggers_email(
     async_client: AsyncClient,
     registered_user: dict,
 ):
-    with patch("app.auth.router.send_password_reset_email", new_callable=AsyncMock) as mock_reset_email:
+    with patch("app.auth.router.send_password_reset_otp_email", new_callable=AsyncMock) as mock_reset_email:
         mock_reset_email.return_value = True
 
         response = await async_client.post(
@@ -94,10 +94,11 @@ async def test_forgot_password_endpoint_triggers_email(
 
         assert response.status_code == 200
         data = response.json()
-        assert "reset instructions have been generated" in data["message"]
+        assert "verification instructions have been generated" in data["message"]
         assert data["reset_token"] is not None
+        assert len(data["reset_token"]) == 6
 
-        # Verify background task invoked send_password_reset_email
+        # Verify background task invoked send_password_reset_otp_email
         assert mock_reset_email.call_count == 1
         assert mock_reset_email.call_args.args[0] == registered_user["email"]
         assert mock_reset_email.call_args.args[1] == data["reset_token"]

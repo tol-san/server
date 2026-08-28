@@ -20,6 +20,11 @@ from app.core.exceptions import (
     UnauthorizedException,
     UsernameAlreadyExistsException,
 )
+from app.core.otp import (
+    generate_otp,
+    store_password_reset_otp,
+    verify_password_reset_otp,
+)
 from app.core.redis import blacklist_token, is_token_blacklisted
 from app.core.security import (
     create_access_token,
@@ -169,36 +174,50 @@ class AuthService:
         self,
         db: AsyncSession,
         email: str,
-    ) -> Optional[str]:
-        user = await self.user_repo.get_by_email(db, email)
+    ) -> Optional[tuple[str, Optional[str]]]:
+        clean_email = email.lower().strip()
+        user = await self.user_repo.get_by_email(db, clean_email)
         if not user:
             return None
 
-        reset_token = create_password_reset_token(user.id, user.email)
-        return reset_token
+        otp = generate_otp()
+        await store_password_reset_otp(
+            email=clean_email,
+            user_id=user.id,
+            otp=otp,
+            expire_seconds=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES * 60,
+        )
+        return otp, user.username
 
     async def reset_password(
         self,
         db: AsyncSession,
         payload: ResetPasswordRequest,
     ) -> None:
-        token_payload = decode_token(payload.token)
+        user_id: Optional[uuid.UUID] = None
+        raw_token = payload.token.strip()
 
-        if token_payload.get("type") != "password_reset":
-            raise BadRequestException("Invalid token type for password reset.")
+        # 1. Try OTP verification (works with or without email)
+        if len(raw_token) == 6 and raw_token.isdigit():
+            user_id = await verify_password_reset_otp(str(payload.email) if payload.email else None, raw_token)
 
-        user_id_str = token_payload.get("sub")
-        if not user_id_str:
-            raise BadRequestException("Invalid token payload.")
+        # 2. If not found, try JWT token verification for backward compatibility
+        if not user_id:
+            try:
+                token_payload = decode_token(raw_token)
+                if token_payload.get("type") == "password_reset":
+                    user_id_str = token_payload.get("sub")
+                    if user_id_str:
+                        user_id = uuid.UUID(user_id_str)
+            except Exception:
+                pass
 
-        try:
-            user_id = uuid.UUID(user_id_str)
-        except (ValueError, TypeError):
-            raise BadRequestException("Invalid user identifier in token.")
+        if not user_id:
+            raise UnauthorizedException("Invalid or expired verification code or token.")
 
         user = await self.user_repo.get_by_id(db, user_id)
         if not user:
-            raise BadRequestException("User not found.")
+            raise UnauthorizedException("User not found.")
 
         hashed_password = get_password_hash(payload.new_password)
         await self.user_repo.update_password(db, user, hashed_password)

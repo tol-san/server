@@ -95,7 +95,12 @@ class ForgotPasswordResponse(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str = Field(..., description="Password reset verification token")
+    email: Optional[EmailStr] = Field(None, description="Registered account email address")
+    token: str = Field(
+        ...,
+        validation_alias=AliasChoices("token", "otp", "code"),
+        description="Password reset verification token or 6-digit OTP",
+    )
     new_password: str = Field(
         ...,
         min_length=8,

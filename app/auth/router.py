@@ -18,7 +18,7 @@ from app.auth.schemas import (
 from app.auth.service import AuthService, auth_service
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.email import send_password_reset_email
+from app.core.email import send_password_reset_email, send_password_reset_otp_email
 from app.users.models import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -90,7 +90,7 @@ async def logout(
     response_model=ForgotPasswordResponse,
     status_code=status.HTTP_200_OK,
     summary="Request password reset",
-    description="Generate a password reset token for the specified email address and dispatch reset email instructions.",
+    description="Generate a 6-digit verification code for the specified email address and dispatch email instructions.",
 )
 async def forgot_password(
     payload: ForgotPasswordRequest,
@@ -98,13 +98,15 @@ async def forgot_password(
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> ForgotPasswordResponse:
-    token = await service.request_password_reset(db, payload.email)
-    if token:
-        background_tasks.add_task(send_password_reset_email, payload.email, token)
+    result = await service.request_password_reset(db, payload.email)
+    if result:
+        otp, username = result
+        background_tasks.add_task(send_password_reset_otp_email, payload.email, otp, username)
+        reset_token = otp if settings.DEBUG else None
+    else:
+        reset_token = None
 
-    message = "If this email is registered, password reset instructions have been generated."
-    # In development mode, return the token in response to allow rapid testing
-    reset_token = token if settings.DEBUG else None
+    message = "If this email is registered, verification instructions have been generated."
     return ForgotPasswordResponse(message=message, reset_token=reset_token)
 
 
