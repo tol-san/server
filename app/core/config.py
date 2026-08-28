@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "GenZ Media API"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    ENVIRONMENT: str = "production"
+    DEBUG: bool = False
 
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     # Observability
     ENABLE_METRICS: bool = True
     LOG_FORMAT: str = "json"  # "json" or "text" (text for local dev)
+    METRICS_API_KEY: str = ""  # If set, /metrics requires X-Metrics-Token header
 
 
 settings = Settings()

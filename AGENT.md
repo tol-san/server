@@ -132,7 +132,7 @@ uv run alembic downgrade -1
 1. **Typing:** Use Python type hints (`str`, `int`, `uuid.UUID`, `datetime`, `list[T]`, `dict[K, V]`, `Optional[T]`) across all functions.
 2. **Dependency Injection:** Use FastAPI's `Depends()` for database sessions (`AsyncSession`), current authenticated users, and permission checking.
 3. **Error Handling:** Raise HTTP-friendly custom exceptions mapped to standardized JSON error responses rather than returning raw unhandled error dictionaries.
-4. **Documentation Sync:** Whenever adding or altering API contracts, update the corresponding documentation files in [`docs/`](docs/README.md).
+4. **Documentation Synchronization**: Whenever adding a new feature, endpoint, data model, schema, or altering existing contracts, **ALWAYS** update the corresponding documentation files in `docs/` (`server/docs/` and `client/docs/`) immediately to maintain 100% consistency between documentation and code.
 
 ---
 

@@ -130,14 +130,33 @@ async def test_forgot_and_reset_password_workflow(async_client: AsyncClient, reg
         json={"email": registered_user["email"]},
     )
     assert forgot_resp.status_code == 200
-    reset_token = forgot_resp.json()["reset_token"]
-    assert reset_token is not None
+    # Secure: OTP is NOT exposed in the HTTP response body
+    assert forgot_resp.json()["reset_token"] is None
+
+    # Retrieve dispatched OTP from Redis / memory store (simulating email reception)
+    import json
+    from app.core.redis import get_redis_client
+    from app.core.otp import _in_memory_otp
+
+    clean_email = registered_user["email"].lower().strip()
+    otp_code = None
+    try:
+        client = get_redis_client()
+        raw = await client.get(f"otp:reset:{clean_email}")
+        if raw:
+            otp_code = json.loads(raw).get("otp")
+    except Exception:
+        pass
+    if not otp_code and clean_email in _in_memory_otp:
+        otp_code = _in_memory_otp[clean_email][0].get("otp")
+
+    assert otp_code is not None
 
     # 2. Reset password
     new_pwd = "BrandNewPassword456!"
     reset_resp = await async_client.post(
         "/api/v1/auth/reset-password",
-        json={"token": reset_token, "new_password": new_pwd},
+        json={"token": otp_code, "new_password": new_pwd},
     )
     assert reset_resp.status_code == 200
 

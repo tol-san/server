@@ -15,6 +15,19 @@ logger = logging.getLogger(__name__)
 
 # Fallback in-memory storage for test/offline environments: key -> (data_dict, expiry_timestamp)
 _in_memory_otp: dict[str, tuple[dict, float]] = {}
+_MAX_MEMORY_OTP_SIZE = 500  # Maximum pending OTPs in memory fallback
+
+def _cleanup_in_memory_otp() -> None:
+    """Remove expired entries from in-memory OTP store."""
+    now = time.time()
+    expired = [k for k, (_, exp) in _in_memory_otp.items() if now >= exp]
+    for k in expired:
+        del _in_memory_otp[k]
+    if len(_in_memory_otp) >= _MAX_MEMORY_OTP_SIZE:
+        oldest = sorted(_in_memory_otp.items(), key=lambda x: x[1][1])[:_MAX_MEMORY_OTP_SIZE // 2]
+        for k, _ in oldest:
+            del _in_memory_otp[k]
+
 
 
 def generate_otp() -> str:
@@ -54,6 +67,7 @@ async def store_password_reset_otp(
         logger.debug("[OTP] Stored reset OTP in Redis for %s (TTL: %ds)", clean_email, expire_seconds)
     except Exception as exc:
         logger.warning("[OTP] Redis store failed, falling back to memory: %s", exc)
+        _cleanup_in_memory_otp()
         _in_memory_otp[clean_email] = (data, time.time() + expire_seconds)
         _in_memory_otp[f"code:{otp}"] = (data, time.time() + expire_seconds)
 
@@ -136,6 +150,7 @@ async def store_signup_otp(
         logger.debug("[OTP] Stored signup OTP in Redis for %s (TTL: %ds)", clean_email, expire_seconds)
     except Exception as exc:
         logger.warning("[OTP] Redis store failed for signup, falling back to memory: %s", exc)
+        _cleanup_in_memory_otp()
         _in_memory_otp[f"signup:{clean_email}"] = (data, time.time() + expire_seconds)
 
 

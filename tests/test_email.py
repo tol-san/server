@@ -95,10 +95,11 @@ async def test_forgot_password_endpoint_triggers_email(
         assert response.status_code == 200
         data = response.json()
         assert "verification instructions have been generated" in data["message"]
-        assert data["reset_token"] is not None
-        assert len(data["reset_token"]) == 6
+        assert data["reset_token"] is None
 
         # Verify background task invoked send_password_reset_otp_email
         assert mock_reset_email.call_count == 1
         assert mock_reset_email.call_args.args[0] == registered_user["email"]
-        assert mock_reset_email.call_args.args[1] == data["reset_token"]
+        sent_otp = mock_reset_email.call_args.args[1]
+        assert len(sent_otp) == 6
+        assert sent_otp.isdigit()

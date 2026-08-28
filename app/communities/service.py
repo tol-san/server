@@ -186,9 +186,9 @@ class CommunityService:
 
         # Clean up cover image from MinIO if exists
         if community.cover_image_url:
-            storage_service.delete_file_by_url(community.cover_image_url)
+            await storage_service.delete_file_by_url(community.cover_image_url)
         if community.avatar_url:
-            storage_service.delete_file_by_url(community.avatar_url)
+            await storage_service.delete_file_by_url(community.avatar_url)
 
         await self.community_repo.delete(db, community)
 
@@ -256,7 +256,7 @@ class CommunityService:
 
         # Remove old cover
         if community.cover_image_url:
-            storage_service.delete_file_by_url(community.cover_image_url)
+            await storage_service.delete_file_by_url(community.cover_image_url)
 
         object_name = f"communities/{community_id}/cover_{uuid.uuid4()}.webp"
         cover_url = storage_service.upload_file(

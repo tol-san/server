@@ -14,20 +14,19 @@
 ```text
 /api/v1/auth             # Registration, login, token refresh, password resets
 /api/v1/users            # User retrieval, relationships, follow/unfollow, blocking
-/api/v1/profiles         # Current user profile inspection and updates
+/api/v1/profiles         # Current user profile inspection, avatar upload, and updates
 /api/v1/interests        # Available master interests taxonomy
-/api/v1/communities      # Community creation, settings, join/leave, moderation
-/api/v1/posts            # Publishing, retrieving, updating, deleting posts
+/api/v1/communities      # Community creation, covers, settings, join/leave, moderation
+/api/v1/posts            # Publishing, retrieving, filtering, updating, media upload, deleting posts
 /api/v1/comments         # Post commenting and reply trees
-/api/v1/reactions        # Likes and reactions
 /api/v1/saved-posts      # Bookmarks / saved post collections
 /api/v1/feeds            # Home, discover, and short video feeds
 /api/v1/search           # Search across users, posts, and communities
 /api/v1/recommendations  # Interest-based suggestions
 /api/v1/notifications    # Notification management and read states
 /api/v1/reports          # User moderation and flagging
-/api/v1/chats            # WebSocket endpoints and chat history
-/api/v1/live-rooms       # Live streaming sessions and access tokens
+/api/v1/chats            # WebSocket endpoints, tickets, presence, and chat history
+/api/v1/live-rooms       # Live streaming sessions, tokens, metrics, and webhooks
 ```
 
 ---
@@ -41,7 +40,7 @@
 | `POST` | `/api/v1/auth/register/verify-otp` | Verify registration OTP, auto-generate unique username, and create user |
 | `POST` | `/api/v1/auth/register` | Direct user registration (legacy) |
 | `POST` | `/api/v1/auth/login` | Login and obtain access + refresh tokens |
-| `POST` | `/api/v1/auth/refresh` | Refresh expired access token |
+| `POST` | `/api/v1/auth/refresh` | Refresh expired access token with token rotation |
 | `POST` | `/api/v1/auth/logout` | Revoke active refresh token and session |
 | `POST` | `/api/v1/auth/forgot-password` | Request password reset OTP via email (7-min TTL) |
 | `POST` | `/api/v1/auth/verify-otp` | Verify password reset OTP code |
@@ -59,9 +58,13 @@
 | `DELETE` | `/api/v1/users/{user_id}/follow` | Unfollow a user |
 | `POST` | `/api/v1/users/{user_id}/block` | Block a user |
 | `DELETE` | `/api/v1/users/{user_id}/block` | Unblock a user |
+| `GET` | `/api/v1/users/me/blocked` | List users blocked by current user |
+| `GET` | `/api/v1/users/{user_id}/relationship` | Check bidirectional follow/block relationship |
 | `GET` | `/api/v1/profiles/me` | Get current user's profile |
-| `PATCH` | `/api/v1/profiles/me` | Update current user's profile & avatar |
-| `PUT` | `/api/v1/profiles/me/interests` | Set selected interests |
+| `PATCH` | `/api/v1/profiles/me` | Update current user's display name, bio, or username |
+| `POST` | `/api/v1/profiles/me/avatar` | Upload and auto-convert user avatar to WebP (max 5MB) |
+| `DELETE` | `/api/v1/profiles/me/avatar` | Remove user avatar |
+| `PUT` | `/api/v1/profiles/me/interests` | Set selected onboarding interests |
 
 ### Interests (`/api/v1/interests`)
 | Method | Path | Description |
@@ -73,41 +76,55 @@
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/api/v1/communities` | Create a new community |
+| `GET` | `/api/v1/communities` | List/search communities with filters |
+| `GET` | `/api/v1/communities/me/joined` | List communities joined by current user |
 | `GET` | `/api/v1/communities/{community_id}` | Get community details |
 | `PATCH` | `/api/v1/communities/{community_id}` | Update community settings (Owner) |
-| `POST` | `/api/v1/communities/{community_id}/join` | Join public community or submit request |
+| `POST` | `/api/v1/communities/{community_id}/cover` | Upload community cover image (max 5MB) |
+| `POST` | `/api/v1/communities/{community_id}/join` | Join public community or submit join request |
 | `DELETE` | `/api/v1/communities/{community_id}/leave` | Leave a community |
 | `GET` | `/api/v1/communities/{community_id}/members` | List community members |
 | `DELETE` | `/api/v1/communities/{community_id}/members/{user_id}` | Remove member (Owner) |
 | `GET` | `/api/v1/communities/{community_id}/join-requests` | View pending join requests (Owner) |
-| `POST` | `/api/v1/communities/{community_id}/join-requests/{request_id}/approve` | Approve request (Owner) |
-| `POST` | `/api/v1/communities/{community_id}/join-requests/{request_id}/reject` | Reject request (Owner) |
+| `POST` | `/api/v1/communities/{community_id}/join-requests/{request_id}/approve` | Approve join request (Owner) |
+| `POST` | `/api/v1/communities/{community_id}/join-requests/{request_id}/reject` | Reject join request (Owner) |
 
 ### Posts & Media (`/api/v1/posts`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/v1/posts` | Create text, image, or short video post |
-| `GET` | `/api/v1/posts/{post_id}` | Get single post details |
-| `DELETE` | `/api/v1/posts/{post_id}` | Delete post (Author / Owner / Admin) |
+| `POST` | `/api/v1/posts` | Create text, image carousel, or short video post |
+| `POST` | `/api/v1/posts/media` | Upload post media (Images up to 10MB converted to WebP; Videos up to 50MB) |
+| `GET` | `/api/v1/posts` | List and filter posts by author, community, post type, visibility, search |
+| `GET` | `/api/v1/posts/{post_id}` | Get single post details with media and author info |
+| `PATCH` | `/api/v1/posts/{post_id}` | Update post content or visibility (Author only) |
+| `DELETE` | `/api/v1/posts/{post_id}` | Delete post and associated media (Author / Owner / Admin) |
 | `POST` | `/api/v1/posts/{post_id}/like` | Like a post |
 | `DELETE` | `/api/v1/posts/{post_id}/like` | Remove like from a post |
 | `POST` | `/api/v1/posts/{post_id}/save` | Save/bookmark a post |
 | `DELETE` | `/api/v1/posts/{post_id}/save` | Remove post from bookmarks |
+| `POST` | `/api/v1/posts/{post_id}/share` | Increment share counter and return shareable link |
 
 ### Comments (`/api/v1/comments`, `/api/v1/posts/{post_id}/comments`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/v1/posts/{post_id}/comments` | List comments for a post |
+| `GET` | `/api/v1/posts/{post_id}/comments` | List top-level comments for a post |
 | `POST` | `/api/v1/posts/{post_id}/comments` | Post a new comment or reply |
+| `GET` | `/api/v1/comments/{comment_id}` | Get single comment details |
+| `GET` | `/api/v1/comments/{comment_id}/replies` | List nested replies for a comment |
 | `PATCH` | `/api/v1/comments/{comment_id}` | Edit comment (Author only) |
 | `DELETE` | `/api/v1/comments/{comment_id}` | Delete comment (Author / Moderator) |
+
+### Saved Posts (`/api/v1/saved-posts`)
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/saved-posts` | List saved/bookmarked posts for authenticated user |
 
 ### Feeds & Discovery (`/api/v1/feeds`, `/api/v1/recommendations`, `/api/v1/search`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/v1/feeds/home` | Personalized home feed |
+| `GET` | `/api/v1/feeds/home` | Personalized home feed (Following + Interested communities) |
 | `GET` | `/api/v1/feeds/discover` | Community and post discovery feed |
-| `GET` | `/api/v1/feeds/shorts` | Vertical short video feed |
+| `GET` | `/api/v1/feeds/shorts` | Vertical short-form video feed |
 | `GET` | `/api/v1/recommendations/communities` | Recommended communities by interests |
 | `GET` | `/api/v1/recommendations/users` | Recommended users by shared interests |
 | `GET` | `/api/v1/search` | Unified global search across users, communities, posts, and interests |
@@ -131,13 +148,21 @@
 | `POST` | `/api/v1/reports` | Submit report against user, post, comment, community, or chat |
 | `GET` | `/api/v1/reports` | List reports with status, type, and community filters (Admin/Owner) |
 | `GET` | `/api/v1/reports/{report_id}` | Get report details (Admin or Community Owner) |
-| `PATCH` | `/api/v1/reports/{report_id}/status` | Update report status (`PENDING` -> `REVIEWING` -> `RESOLVED`/`REJECTED`) and apply actions |
+| `PATCH` | `/api/v1/reports/{report_id}/status` | Update report status (`PENDING` -> `REVIEWING` -> `RESOLVED`/`REJECTED`) |
 
 ### Real-Time Chat & Live Rooms (`/api/v1/chats`, `/api/v1/live-rooms`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `WS` | `/api/v1/chats/ws/{community_id}` | WebSocket connection for community chat |
-| `GET` | `/api/v1/chats/{community_id}/messages` | Fetch chat message history |
-| `POST` | `/api/v1/live-rooms` | Create live room session (Owner) |
-| `POST` | `/api/v1/live-rooms/{room_id}/token` | Obtain streaming access token (LiveKit/Agora) |
-| `POST` | `/api/v1/live-rooms/{room_id}/end` | End live room session |
+| `GET` | `/api/v1/chats/ws-ticket` | Issue short-lived, single-use ticket for WebSocket authentication |
+| `WS` | `/api/v1/chats/ws/{community_id}` | WebSocket connection for community group chat |
+| `GET` | `/api/v1/chats/{community_id}/messages` | Fetch paginated chat message history |
+| `GET` | `/api/v1/chats/{community_id}/presence` | Fetch online active participants in community chat |
+| `POST` | `/api/v1/live-rooms` | Create live stream room session (Owner) |
+| `GET` | `/api/v1/live-rooms` | List active live stream rooms |
+| `GET` | `/api/v1/live-rooms/{room_id}` | Get live room details |
+| `POST` | `/api/v1/live-rooms/{room_id}/start` | Start live streaming session |
+| `POST` | `/api/v1/live-rooms/{room_id}/token` | Obtain streaming participant/viewer token (LiveKit) |
+| `POST` | `/api/v1/live-rooms/{room_id}/end` | End live streaming room session |
+| `GET` | `/api/v1/live-rooms/{room_id}/metrics` | Get live viewer analytics and stream metrics |
+| `POST` | `/api/v1/live-rooms/webhooks/livekit` | Webhook receiver for LiveKit media server lifecycle events |
+| `POST` | `/api/v1/live-rooms/{room_id}/reconcile` | Synchronize Redis viewer count with LiveKit server (Admin) |

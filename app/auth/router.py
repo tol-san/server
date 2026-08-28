@@ -1,9 +1,25 @@
 from typing import Optional
+import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
+from app.core.cache import cache_service
+
+logger = logging.getLogger(__name__)
+
+async def _rate_limit(key: str, max_requests: int, window_seconds: int) -> None:
+    """Simple Redis-backed rate limiter. Raises 429 if limit exceeded."""
+    count = await cache_service.incr(key)
+    if count == 1:
+        # First request in window — set the TTL
+        await cache_service.set(key, count, ttl=window_seconds)
+    if count > max_requests:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please wait and retry.",
+        )
 from app.auth.schemas import (
     ChangePasswordRequest,
     CheckUsernameResponse,
@@ -49,6 +65,7 @@ async def request_signup_otp(
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> SignupOtpResponse:
+    await _rate_limit(f"ratelimit:signup_otp:{payload.email.lower()}", max_requests=5, window_seconds=60)
     otp, clean_email = await service.request_signup_otp(db, payload.email, payload.password)
     if settings.SMTP_HOST:
         await send_signup_otp_email(clean_email, otp)
@@ -74,6 +91,7 @@ async def verify_signup_otp(
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> TokenResponse:
+    await _rate_limit(f"ratelimit:verify_signup_otp:{payload.email.lower()}", max_requests=5, window_seconds=300)
     return await service.verify_signup_otp_and_create_user(db, payload.email, payload.otp)
 
 
@@ -105,6 +123,7 @@ async def login(
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> TokenResponse:
+    await _rate_limit(f"ratelimit:login:{payload.identifier.lower()}", max_requests=10, window_seconds=60)
     return await service.login(db, payload)
 
 
@@ -152,13 +171,14 @@ async def forgot_password(
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> ForgotPasswordResponse:
+    await _rate_limit(f"ratelimit:forgot_password:{payload.email.lower()}", max_requests=3, window_seconds=300)
     result = await service.request_password_reset(db, payload.email)
     if result:
         otp, username = result
         background_tasks.add_task(send_password_reset_otp_email, payload.email, otp, username)
-        reset_token = otp if settings.DEBUG else None
-    else:
-        reset_token = None
+        
+    # Never expose OTP in response body — security risk even in DEBUG mode
+    reset_token = None
 
     message = "If this email is registered, verification instructions have been generated."
     return ForgotPasswordResponse(message=message, reset_token=reset_token)
@@ -176,6 +196,7 @@ async def verify_otp(
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> VerifyOtpResponse:
+    await _rate_limit(f"ratelimit:verify_otp:{payload.email.lower()}", max_requests=5, window_seconds=300)
     return await service.verify_otp(db, payload)
 
 

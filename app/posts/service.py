@@ -221,9 +221,9 @@ class PostService:
 
         # Cleanup media files from MinIO
         for item in post.media_items:
-            storage_service.delete_file_by_url(item.url)
+            await storage_service.delete_file_by_url(item.url)
             if item.thumbnail_url:
-                storage_service.delete_file_by_url(item.thumbnail_url)
+                await storage_service.delete_file_by_url(item.thumbnail_url)
 
         await self.post_repo.delete(db, post)
 

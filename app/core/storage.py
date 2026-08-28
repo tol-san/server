@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -177,7 +178,7 @@ class StorageService:
 
         # Delete old avatar from MinIO if it exists
         if old_avatar_url:
-            self.delete_file_by_url(old_avatar_url)
+            await self.delete_file_by_url(old_avatar_url)
 
         # Upload new WebP avatar
         object_name = f"avatars/{user_id}/{uuid.uuid4()}.webp"
@@ -253,7 +254,7 @@ class StorageService:
         allowed_all = list(ALLOWED_POST_IMAGE_TYPES) + list(ALLOWED_POST_VIDEO_TYPES.keys())
         raise BadRequestException(f"Unsupported media format '{content_type}'. Allowed: {', '.join(allowed_all)}")
 
-    def delete_file(
+    async def delete_file(
         self,
         object_name: str,
         bucket_name: Optional[str] = None,
@@ -261,12 +262,12 @@ class StorageService:
         """Delete an object from MinIO."""
         bucket = bucket_name or settings.MINIO_BUCKET_NAME
         try:
-            self.client.remove_object(bucket, object_name)
+            await asyncio.to_thread(self.client.remove_object, bucket, object_name)
             logger.info("Deleted MinIO object: %s/%s", bucket, object_name)
         except Exception as exc:
             logger.warning("Failed to delete MinIO object '%s': %s", object_name, exc)
 
-    def delete_file_by_url(self, url: Optional[str]) -> None:
+    async def delete_file_by_url(self, url: Optional[str]) -> None:
         """Parse object path from URL and delete from MinIO."""
         if not url:
             return
@@ -276,10 +277,10 @@ class StorageService:
             bucket_name = settings.MINIO_BUCKET_NAME
             if path.startswith(bucket_name + "/"):
                 object_name = path[len(bucket_name) + 1 :]
-                self.delete_file(object_name, bucket_name)
+                await self.delete_file(object_name, bucket_name)
             elif "avatars/" in path or "posts/" in path or "communities/" in path:
                 # Direct relative path
-                self.delete_file(path, bucket_name)
+                await self.delete_file(path, bucket_name)
         except Exception as exc:
             logger.warning("Error parsing URL '%s' for deletion: %s", url, exc)
 

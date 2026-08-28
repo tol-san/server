@@ -1,7 +1,7 @@
 [project]
 name = "server"
 version = "0.1.0"
-description = "Add your description here"
+description = "GenZ Media API — FastAPI backend for the GenZ social media platform"
 readme = "README.md"
 authors = [
     { name = "san tol", email = "tolsan42@gmail.com" }
@@ -11,6 +11,7 @@ dependencies = [
     "aiosmtplib>=5.1.2",
     "alembic>=1.19.1",
     "asyncpg>=0.31.0",
+    "dnspython>=2.7.0",
     "email-validator>=2.2.0",
     "fastapi>=0.141.1",
     "livekit-api>=1.2.0",

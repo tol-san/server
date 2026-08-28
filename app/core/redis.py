@@ -11,6 +11,7 @@ redis_client: Optional[aioredis.Redis] = None
 
 # Fallback in-memory storage for test/offline environments
 _in_memory_blacklist: dict[str, float] = {}
+_MAX_BLACKLIST_SIZE = 10000  # Maximum revoked tokens in memory fallback
 
 
 def get_redis_client() -> aioredis.Redis:
@@ -35,6 +36,14 @@ async def blacklist_token(jti: str, expire_seconds: int) -> None:
     except Exception as exc:
         logger.warning("Redis blacklist failed, falling back to memory: %s", exc)
         import time
+        now = time.time()
+        expired = [k for k, exp in _in_memory_blacklist.items() if now >= exp]
+        for k in expired:
+            del _in_memory_blacklist[k]
+        if len(_in_memory_blacklist) >= _MAX_BLACKLIST_SIZE:
+            items = sorted(_in_memory_blacklist.items(), key=lambda x: x[1])
+            for k, _ in items[:_MAX_BLACKLIST_SIZE // 2]:
+                del _in_memory_blacklist[k]
         _in_memory_blacklist[jti] = time.time() + expire_seconds
 
 

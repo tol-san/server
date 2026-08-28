@@ -11,7 +11,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./alembic:/app/alembic
-    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     env_file:
       - path: .env
         required: false
@@ -58,6 +58,7 @@ services:
     container_name: genz_media_postgres
     restart: unless-stopped
     environment:
+      # SECURITY: Override POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD, and MEILI_MASTER_KEY in production
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-genz_media}

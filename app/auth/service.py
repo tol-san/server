@@ -51,6 +51,31 @@ class AuthService:
     def __init__(self, user_repo: UserRepository = user_repository):
         self.user_repo = user_repo
 
+    @staticmethod
+    async def _index_user_to_search(user: "User") -> None:
+        """Index the user in Meilisearch. Logs warning on failure but does not raise."""
+        try:
+            from app.core.meilisearch import meilisearch_service
+            await meilisearch_service.index_user(
+                {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "display_name": user.profile.display_name if user.profile else user.username,
+                    "avatar_url": user.profile.avatar_url if user.profile else None,
+                    "bio": user.profile.bio if user.profile else None,
+                    "follower_count": 0,
+                    "is_active": user.is_active,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                }
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[Search] Failed to index user %s in Meilisearch: %s",
+                user.id,
+                exc,
+            )
+
     async def generate_unique_username(self, db: AsyncSession, email: str) -> str:
         """
         Derive a clean, unique alphanumeric username from the email prefix.
@@ -155,23 +180,7 @@ class AuthService:
             display_name=display_name,
         )
 
-        # Index user into Meilisearch
-        try:
-            from app.core.meilisearch import meilisearch_service
-            await meilisearch_service.index_user(
-                {
-                    "id": str(user.id),
-                    "username": user.username,
-                    "display_name": user.profile.display_name if user.profile else user.username,
-                    "avatar_url": user.profile.avatar_url if user.profile else None,
-                    "bio": user.profile.bio if user.profile else None,
-                    "follower_count": 0,
-                    "is_active": user.is_active,
-                    "created_at": user.created_at.isoformat() if user.created_at else None,
-                }
-            )
-        except Exception:
-            pass
+        await self._index_user_to_search(user)
 
         access_token = create_access_token(user.id)
         refresh_token, _ = create_refresh_token(user.id)
@@ -222,23 +231,7 @@ class AuthService:
             display_name=display_name,
         )
 
-        # Index user into Meilisearch
-        try:
-            from app.core.meilisearch import meilisearch_service
-            await meilisearch_service.index_user(
-                {
-                    "id": str(user.id),
-                    "username": user.username,
-                    "display_name": user.profile.display_name if user.profile else user.username,
-                    "avatar_url": user.profile.avatar_url if user.profile else None,
-                    "bio": user.profile.bio if user.profile else None,
-                    "follower_count": 0,
-                    "is_active": user.is_active,
-                    "created_at": user.created_at.isoformat() if user.created_at else None,
-                }
-            )
-        except Exception:
-            pass
+        await self._index_user_to_search(user)
 
         return user
 
@@ -393,8 +386,9 @@ class AuthService:
                     user_id_str = token_payload.get("sub")
                     if user_id_str:
                         user_id = uuid.UUID(user_id_str)
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Silent exception: %s", exc)
 
         if not user_id:
             raise UnauthorizedException("Invalid or expired verification code or token.")

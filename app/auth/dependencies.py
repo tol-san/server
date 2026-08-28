@@ -60,3 +60,32 @@ async def get_current_active_superuser(
     if not current_user.is_superuser:
         raise ForbiddenException("Administrator privileges required.")
     return current_user
+
+
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/login",
+    auto_error=False,
+)
+
+
+async def get_optional_current_user(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """Return authenticated user if a valid token is provided, or None for anonymous callers."""
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "access":
+            return None
+        user_id_str = payload.get("sub")
+        if not user_id_str:
+            return None
+        user_id = uuid.UUID(user_id_str)
+        user = await user_repository.get_by_id(db, user_id)
+        if not user or not user.is_active:
+            return None
+        return user
+    except Exception:
+        return None

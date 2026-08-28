@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, Sequence, Tuple
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -141,16 +141,18 @@ class UserRepository:
         db.add(follow)
 
         # Update follower's following_count
-        follower_profile = (await db.execute(select(Profile).where(Profile.user_id == follower_id))).scalar_one_or_none()
-        if follower_profile:
-            follower_profile.following_count += 1
-            db.add(follower_profile)
+        await db.execute(
+            update(Profile)
+            .where(Profile.user_id == follower_id)
+            .values(following_count=Profile.following_count + 1)
+        )
 
         # Update following's follower_count
-        following_profile = (await db.execute(select(Profile).where(Profile.user_id == following_id))).scalar_one_or_none()
-        if following_profile:
-            following_profile.follower_count += 1
-            db.add(following_profile)
+        await db.execute(
+            update(Profile)
+            .where(Profile.user_id == following_id)
+            .values(follower_count=Profile.follower_count + 1)
+        )
 
         await db.commit()
         return True
@@ -167,16 +169,18 @@ class UserRepository:
         await db.delete(follow)
 
         # Update follower's following_count
-        follower_profile = (await db.execute(select(Profile).where(Profile.user_id == follower_id))).scalar_one_or_none()
-        if follower_profile:
-            follower_profile.following_count = max(0, follower_profile.following_count - 1)
-            db.add(follower_profile)
+        await db.execute(
+            update(Profile)
+            .where(Profile.user_id == follower_id)
+            .values(following_count=case((Profile.following_count > 0, Profile.following_count - 1), else_=0))
+        )
 
         # Update following's follower_count
-        following_profile = (await db.execute(select(Profile).where(Profile.user_id == following_id))).scalar_one_or_none()
-        if following_profile:
-            following_profile.follower_count = max(0, following_profile.follower_count - 1)
-            db.add(following_profile)
+        await db.execute(
+            update(Profile)
+            .where(Profile.user_id == following_id)
+            .values(follower_count=case((Profile.follower_count > 0, Profile.follower_count - 1), else_=0))
+        )
 
         await db.commit()
         return True
@@ -264,14 +268,16 @@ class UserRepository:
         )).scalar_one_or_none()
         if follow1:
             await db.delete(follow1)
-            p1 = (await db.execute(select(Profile).where(Profile.user_id == blocker_id))).scalar_one_or_none()
-            if p1:
-                p1.following_count = max(0, p1.following_count - 1)
-                db.add(p1)
-            p2 = (await db.execute(select(Profile).where(Profile.user_id == blocked_id))).scalar_one_or_none()
-            if p2:
-                p2.follower_count = max(0, p2.follower_count - 1)
-                db.add(p2)
+            await db.execute(
+                update(Profile)
+                .where(Profile.user_id == blocker_id)
+                .values(following_count=case((Profile.following_count > 0, Profile.following_count - 1), else_=0))
+            )
+            await db.execute(
+                update(Profile)
+                .where(Profile.user_id == blocked_id)
+                .values(follower_count=case((Profile.follower_count > 0, Profile.follower_count - 1), else_=0))
+            )
 
         # Sever follow: blocked -> blocker (if exists)
         follow2 = (await db.execute(
@@ -279,14 +285,16 @@ class UserRepository:
         )).scalar_one_or_none()
         if follow2:
             await db.delete(follow2)
-            p2 = (await db.execute(select(Profile).where(Profile.user_id == blocked_id))).scalar_one_or_none()
-            if p2:
-                p2.following_count = max(0, p2.following_count - 1)
-                db.add(p2)
-            p1 = (await db.execute(select(Profile).where(Profile.user_id == blocker_id))).scalar_one_or_none()
-            if p1:
-                p1.follower_count = max(0, p1.follower_count - 1)
-                db.add(p1)
+            await db.execute(
+                update(Profile)
+                .where(Profile.user_id == blocked_id)
+                .values(following_count=case((Profile.following_count > 0, Profile.following_count - 1), else_=0))
+            )
+            await db.execute(
+                update(Profile)
+                .where(Profile.user_id == blocker_id)
+                .values(follower_count=case((Profile.follower_count > 0, Profile.follower_count - 1), else_=0))
+            )
 
         await db.commit()
         return True

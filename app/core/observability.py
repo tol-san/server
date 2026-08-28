@@ -5,6 +5,7 @@ and trace-ID middleware for distributed tracing.
 import logging
 import time
 import uuid
+import re
 from contextvars import ContextVar
 from typing import Callable
 
@@ -24,6 +25,18 @@ from app.core.config import settings
 # ─────────────────────────────────────────────────────────────────────────────
 # Trace ID context var — propagated per-request
 # ─────────────────────────────────────────────────────────────────────────────
+
+_UUID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+_NUMERIC_ID_PATTERN = re.compile(r"/\d+")
+
+def _normalize_path(path: str) -> str:
+    """Replace UUID and numeric path segments with placeholders for Prometheus label cardinality control."""
+    path = _UUID_PATTERN.sub("{id}", path)
+    path = _NUMERIC_ID_PATTERN.sub("/{id}", path)
+    return path
+
 _trace_id_var: ContextVar[str] = ContextVar("trace_id", default="")
 
 
@@ -119,6 +132,14 @@ DEAD_LETTER_EVENTS_TOTAL = Counter(
 
 def configure_logging() -> None:
     """Configure application-wide structured logging."""
+    log_level = logging.DEBUG if settings.DEBUG else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    root = logging.getLogger()
+    root.setLevel(log_level)
+    
     if settings.LOG_FORMAT == "json":
         try:
             from pythonjsonlogger.json import JsonFormatter
@@ -127,23 +148,26 @@ def configure_logging() -> None:
                 fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
                 rename_fields={"asctime": "timestamp", "levelname": "level"},
             )
-            root = logging.getLogger()
             if root.handlers:
                 root.handlers[0].setFormatter(formatter)
         except ImportError:
             pass  # fall back to default text format
 
 
+class _TraceFilter(logging.Filter):
+    """Injects the current request trace_id into every log record."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.trace_id = get_trace_id()
+        return True
+
+_TRACE_FILTER = _TraceFilter()
+
+
 def get_logger(name: str) -> logging.Logger:
     """Return a logger that auto-injects trace_id into log records."""
-
-    class TraceFilter(logging.Filter):
-        def filter(self, record: logging.LogRecord) -> bool:
-            record.trace_id = get_trace_id()
-            return True
-
     logger = logging.getLogger(name)
-    logger.addFilter(TraceFilter())
+    if not any(isinstance(f, _TraceFilter) for f in logger.filters):
+        logger.addFilter(_TRACE_FILTER)
     return logger
 
 
@@ -166,7 +190,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         response.headers["X-Trace-ID"] = trace_id
 
         # Collapse parameterised path for metric cardinality control
-        path = request.url.path
+        path = _normalize_path(request.url.path)
         method = request.method
         status = str(response.status_code)
 
@@ -175,8 +199,6 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 method=method, endpoint=path, status_code=status
             ).observe(duration)
             HTTP_REQUESTS_TOTAL.labels(
-                method=method, endpoint=path, status_code=status
-            ).increment() if False else HTTP_REQUESTS_TOTAL.labels(
                 method=method, endpoint=path, status_code=status
             ).inc()
 

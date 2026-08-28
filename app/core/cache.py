@@ -6,6 +6,8 @@ from app.core.redis import get_redis_client
 
 logger = logging.getLogger(__name__)
 
+_MAX_MEMORY_CACHE_SIZE = 1000  # Maximum entries in fallback in-memory cache
+
 # Fallback in-memory cache for offline/testing setups
 _in_memory_cache: Dict[str, tuple[Any, float]] = {}
 
@@ -50,6 +52,15 @@ class CacheService:
             logger.debug("Redis cache SET fallback for %s: %s", key, exc)
 
         # 2. Store in memory fallback
+        if len(_in_memory_cache) >= _MAX_MEMORY_CACHE_SIZE:
+            now = time.time()
+            expired_keys = [k for k, (_, exp) in _in_memory_cache.items() if now >= exp]
+            for k in expired_keys:
+                del _in_memory_cache[k]
+            if len(_in_memory_cache) >= _MAX_MEMORY_CACHE_SIZE:
+                oldest_keys = list(_in_memory_cache.keys())[:_MAX_MEMORY_CACHE_SIZE // 2]
+                for k in oldest_keys:
+                    del _in_memory_cache[k]
         _in_memory_cache[key] = (value, time.time() + ttl)
         return True
 

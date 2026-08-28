@@ -36,7 +36,8 @@ async def authenticated_user(async_client: AsyncClient):
     return {"user": reg_payload, "token": access_token, "headers": headers}
 
 
-def test_storage_service_upload_and_delete():
+@pytest.mark.asyncio
+async def test_storage_service_upload_and_delete():
     storage_service.ensure_bucket_exists()
     test_content = b"fake image byte content"
     object_name = "test/sample_image.png"
@@ -50,7 +51,7 @@ def test_storage_service_upload_and_delete():
     assert "genz-media" in url
 
     # Cleanup
-    storage_service.delete_file(object_name)
+    await storage_service.delete_file(object_name)
 
 
 def test_process_and_convert_to_webp():

@@ -60,7 +60,24 @@ async def test_verify_otp_endpoint(async_client):
         json={"email": test_email},
     )
     assert forgot_resp.status_code == 200
-    otp = forgot_resp.json()["reset_token"]
+    assert forgot_resp.json()["reset_token"] is None
+
+    # Retrieve generated OTP from Redis / memory store
+    import json
+    from app.core.redis import get_redis_client
+    from app.core.otp import _in_memory_otp
+
+    otp = None
+    try:
+        client = get_redis_client()
+        raw = await client.get(f"otp:reset:{test_email}")
+        if raw:
+            otp = json.loads(raw).get("otp")
+    except Exception:
+        pass
+    if not otp and test_email in _in_memory_otp:
+        otp = _in_memory_otp[test_email][0].get("otp")
+
     assert otp is not None
     assert len(otp) == 6
 

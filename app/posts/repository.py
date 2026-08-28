@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Optional, Sequence, Tuple
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -67,18 +67,20 @@ class PostRepository:
                 )
                 db.add(media_item)
 
-        # Increment author profile post_count
-        author_profile = (await db.execute(select(Profile).where(Profile.user_id == author_id))).scalar_one_or_none()
-        if author_profile:
-            author_profile.post_count += 1
-            db.add(author_profile)
+        # Increment author profile post_count atomically
+        await db.execute(
+            update(Profile)
+            .where(Profile.user_id == author_id)
+            .values(post_count=Profile.post_count + 1)
+        )
 
-        # Increment community post_count if applicable
+        # Increment community post_count if applicable atomically
         if community_id:
-            comm = (await db.execute(select(Community).where(Community.id == community_id))).scalar_one_or_none()
-            if comm:
-                comm.post_count += 1
-                db.add(comm)
+            await db.execute(
+                update(Community)
+                .where(Community.id == community_id)
+                .values(post_count=Community.post_count + 1)
+            )
 
         await db.commit()
         return await self.get_by_id(db, post.id)  # Returns fully loaded post
@@ -105,17 +107,19 @@ class PostRepository:
         await db.delete(post)
 
         # Decrement author post_count
-        author_profile = (await db.execute(select(Profile).where(Profile.user_id == author_id))).scalar_one_or_none()
-        if author_profile:
-            author_profile.post_count = max(0, author_profile.post_count - 1)
-            db.add(author_profile)
+        await db.execute(
+            update(Profile)
+            .where(Profile.user_id == author_id)
+            .values(post_count=case((Profile.post_count > 0, Profile.post_count - 1), else_=0))
+        )
 
         # Decrement community post_count if applicable
         if community_id:
-            comm = (await db.execute(select(Community).where(Community.id == community_id))).scalar_one_or_none()
-            if comm:
-                comm.post_count = max(0, comm.post_count - 1)
-                db.add(comm)
+            await db.execute(
+                update(Community)
+                .where(Community.id == community_id)
+                .values(post_count=case((Community.post_count > 0, Community.post_count - 1), else_=0))
+            )
 
         await db.commit()
 
@@ -190,9 +194,11 @@ class PostRepository:
 
         like = PostLike(user_id=user_id, post_id=post.id)
         db.add(like)
-        post.like_count += 1
-        db.add(post)
+        await db.execute(
+            update(Post).where(Post.id == post.id).values(like_count=Post.like_count + 1)
+        )
         await db.commit()
+        await db.refresh(post)
         return True, post.like_count
 
     async def unlike_post(
@@ -203,9 +209,11 @@ class PostRepository:
             return False, post.like_count
 
         await db.delete(existing_like)
-        post.like_count = max(0, post.like_count - 1)
-        db.add(post)
+        await db.execute(
+            update(Post).where(Post.id == post.id).values(like_count=case((Post.like_count > 0, Post.like_count - 1), else_=0))
+        )
         await db.commit()
+        await db.refresh(post)
         return False, post.like_count
 
     async def get_saved(
@@ -226,9 +234,11 @@ class PostRepository:
 
         saved = SavedPost(user_id=user_id, post_id=post.id)
         db.add(saved)
-        post.save_count += 1
-        db.add(post)
+        await db.execute(
+            update(Post).where(Post.id == post.id).values(save_count=Post.save_count + 1)
+        )
         await db.commit()
+        await db.refresh(post)
         return True, post.save_count
 
     async def unsave_post(
@@ -239,15 +249,19 @@ class PostRepository:
             return False, post.save_count
 
         await db.delete(existing_saved)
-        post.save_count = max(0, post.save_count - 1)
-        db.add(post)
+        await db.execute(
+            update(Post).where(Post.id == post.id).values(save_count=case((Post.save_count > 0, Post.save_count - 1), else_=0))
+        )
         await db.commit()
+        await db.refresh(post)
         return False, post.save_count
 
     async def increment_share_count(self, db: AsyncSession, post: Post) -> int:
-        post.share_count += 1
-        db.add(post)
+        await db.execute(
+            update(Post).where(Post.id == post.id).values(share_count=Post.share_count + 1)
+        )
         await db.commit()
+        await db.refresh(post)
         return post.share_count
 
     async def list_saved_posts(

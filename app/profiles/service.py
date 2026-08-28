@@ -128,7 +128,7 @@ class ProfileService:
     ) -> CurrentUserProfileResponse:
         old_avatar_url = current_user.profile.avatar_url if current_user.profile else None
         if old_avatar_url:
-            storage_service.delete_file_by_url(old_avatar_url)
+            await storage_service.delete_file_by_url(old_avatar_url)
 
         profile = await self.user_repo.update_profile(
             db,

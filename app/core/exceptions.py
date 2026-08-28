@@ -71,7 +71,27 @@ class ForbiddenException(AppException):
         )
 
 
+class TooManyRequestsException(AppException):
+    def __init__(self, message: str = "Too many requests. Please try again later."):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            error_code="TOO_MANY_REQUESTS",
+        )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(UnauthorizedException)
+    async def unauthorized_exception_handler(request: Request, exc: UnauthorizedException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            headers={"WWW-Authenticate": "Bearer"},
+            content={
+                "detail": exc.message,
+                "error_code": exc.error_code,
+            },
+        )
+
     @app.exception_handler(AppException)
     async def app_exception_handler(request: Request, exc: AppException):
         return JSONResponse(

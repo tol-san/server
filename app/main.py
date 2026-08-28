@@ -52,6 +52,19 @@ def _create_worker_tasks() -> list[asyncio.Task]:
         for w in workers
     ]
 
+def _on_worker_done(task: asyncio.Task) -> None:
+    """Log unexpected worker termination."""
+    if task.cancelled():
+        return
+    exc = task.exception() if not task.cancelled() else None
+    if exc is not None:
+        logger.error(
+            "Background worker '%s' crashed unexpectedly: %s",
+            task.get_name(),
+            exc,
+            exc_info=exc,
+        )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,6 +80,10 @@ async def lifespan(app: FastAPI):
     # Start background workers
     tasks = _create_worker_tasks()
     _worker_tasks.extend(tasks)
+    
+    for task in tasks:
+        task.add_done_callback(_on_worker_done)
+        
     logger.info("Started %d background workers", len(tasks))
 
     yield
@@ -97,8 +114,7 @@ def create_application() -> FastAPI:
     origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS] if settings.BACKEND_CORS_ORIGINS else []
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=origins if origins else ["*"],
-        allow_origin_regex=r"^https?://.*$" if (settings.DEBUG or settings.ENVIRONMENT == "development") else None,
+        allow_origins=origins if origins else ["http://localhost:3000"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -111,9 +127,18 @@ def create_application() -> FastAPI:
     # Register custom exception handlers
     register_exception_handlers(application)
 
-    # Prometheus metrics endpoint (no auth — protect at network level in prod)
+    # Prometheus metrics endpoint
     if settings.ENABLE_METRICS:
-        application.add_route("/metrics", metrics_endpoint, methods=["GET"])
+        import os
+        async def protected_metrics_endpoint(request: Request):
+            api_key = os.environ.get("METRICS_API_KEY", "")
+            if api_key:
+                token = request.headers.get("X-Metrics-Token", "")
+                if token != api_key:
+                    from fastapi.responses import Response as FastAPIResponse
+                    return FastAPIResponse(status_code=403, content="Forbidden")
+            return await metrics_endpoint(request)
+        application.add_route("/metrics", protected_metrics_endpoint, methods=["GET"])
 
     # Include routers
     application.include_router(auth_router, prefix=settings.API_V1_STR)
