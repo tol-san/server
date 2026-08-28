@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,10 +82,11 @@ async def refresh_token(
     description="Revoke the provided refresh token and invalidate the active session.",
 )
 async def logout(
-    payload: RefreshTokenRequest,
+    payload: Optional[RefreshTokenRequest] = None,
     service: AuthService = Depends(lambda: auth_service),
 ) -> MessageResponse:
-    await service.logout(payload.refresh_token)
+    if payload and payload.refresh_token:
+        await service.logout(payload.refresh_token)
     return MessageResponse(message="Successfully logged out.")
 
 
