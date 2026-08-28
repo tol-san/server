@@ -145,3 +145,27 @@ For detailed functional specifications, refer to:
 - [04. Database Design & Domain Model](docs/04-database-design.md)
 - [05. API Specification](docs/05-api-specification.md)
 - [06. Development Roadmap](docs/06-roadmap.md)
+
+---
+
+## 7. Available MCP Tools & Capabilities
+
+The following MCP servers are configured in `.agents/mcp_config.json`:
+
+1. **PostgreSQL MCP (`postgres`)**:
+   - Direct connection to PostgreSQL 17 (`localhost:5433/genz_media`).
+   - Use for inspecting table schemas, verifying Alembic migrations, and executing SQL queries.
+
+2. **Redis MCP (`redis`)**:
+   - Connected to `redis://localhost:6379/0`.
+   - Use for inspecting cache keys, TTLs, session tokens, and pub/sub channels.
+
+3. **Docker MCP (`docker`)**:
+   - Use for checking status and logs of `genz_media_server`, `postgres`, `redis`, `minio`, `meilisearch`.
+
+4. **GitHub MCP (`github`)**:
+   - Use for creating PRs, reviewing code, managing issues, and tracking commit history.
+
+5. **Context7 MCP (`context7`)**:
+   - Use for fetching up-to-date documentation on FastAPI, SQLAlchemy 2.0, Alembic, and dependencies.
+
