@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -18,6 +18,7 @@ from app.auth.schemas import (
 from app.auth.service import AuthService, auth_service
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.email import send_password_reset_email
 from app.users.models import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -89,14 +90,18 @@ async def logout(
     response_model=ForgotPasswordResponse,
     status_code=status.HTTP_200_OK,
     summary="Request password reset",
-    description="Generate a password reset token for the specified email address.",
+    description="Generate a password reset token for the specified email address and dispatch reset email instructions.",
 )
 async def forgot_password(
     payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> ForgotPasswordResponse:
     token = await service.request_password_reset(db, payload.email)
+    if token:
+        background_tasks.add_task(send_password_reset_email, payload.email, token)
+
     message = "If this email is registered, password reset instructions have been generated."
     # In development mode, return the token in response to allow rapid testing
     reset_token = token if settings.DEBUG else None

@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     DEAD_LETTER_AFTER_RETRIES: int = 3
     WORKER_BLOCK_MS: int = 2000  # Redis Streams BLOCK timeout
 
+    # SMTP / Email Configuration
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 1025
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_STARTTLS: bool = False
+    SMTP_USE_SSL: bool = False
+    EMAILS_FROM_EMAIL: str = "noreply@genzmedia.app"
+    EMAILS_FROM_NAME: str = "GenZ Media"
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # Observability
     ENABLE_METRICS: bool = True
     LOG_FORMAT: str = "json"  # "json" or "text" (text for local dev)
