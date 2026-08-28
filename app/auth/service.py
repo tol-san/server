@@ -17,6 +17,7 @@ from app.auth.schemas import (
     VerifyOtpResponse,
 )
 from app.core.config import settings
+from app.core.email_verifier import verify_email_deliverability
 from app.core.exceptions import (
     BadRequestException,
     EmailAlreadyExistsException,
@@ -58,28 +59,29 @@ class AuthService:
         prefix = email.split("@")[0].lower().strip()
         cleaned = re.sub(r"[^a-z0-9_]", "_", prefix)
         cleaned = re.sub(r"_+", "_", cleaned).strip("_")
-        if len(cleaned) < 3:
-            cleaned = f"user_{cleaned}" if cleaned else "user"
-        base = cleaned[:24]
+        if not cleaned:
+            cleaned = "user"
 
-        # 1. Check if base username is available
-        if not await self.user_repo.get_by_username(db, base):
-            return base
+        base_username = cleaned[:20]
+        candidate = base_username
 
-        # 2. Try incremental suffixes base1 .. base9
-        for i in range(1, 10):
-            candidate = f"{base}{i}"
-            if not await self.user_repo.get_by_username(db, candidate):
+        # Check if base username is already available
+        existing = await self.user_repo.get_by_username(db, candidate)
+        if not existing:
+            return candidate
+
+        # Append counter
+        counter = 1
+        while True:
+            candidate = f"{base_username}_{counter}"
+            existing = await self.user_repo.get_by_username(db, candidate)
+            if not existing:
                 return candidate
-
-        # 3. Append random 4-digit unique suffix
-        for _ in range(50):
-            rand_suffix = secrets.randbelow(9000) + 1000
-            candidate = f"{base[:20]}_{rand_suffix}"
-            if not await self.user_repo.get_by_username(db, candidate):
+            counter += 1
+            if counter > 50:
+                # Add random suffix if counter runs high
+                candidate = f"{base_username}_{secrets.randbelow(9000) + 1000}"
                 return candidate
-
-        return f"user_{uuid.uuid4().hex[:8]}"
 
     async def check_username_available(self, db: AsyncSession, username: str) -> bool:
         """Check if a candidate username is available in PostgreSQL."""
@@ -94,13 +96,15 @@ class AuthService:
         password: str,
     ) -> tuple[str, str]:
         """
-        Initiate two-step signup by hashing password, generating 6-digit OTP,
-        and storing in Redis for 5 minutes.
+        Initiate two-step signup by checking deliverability, hashing password,
+        generating 6-digit OTP, and storing in Redis for 7 minutes.
         """
         clean_email = email.lower().strip()
         existing_user = await self.user_repo.get_by_email(db, clean_email)
         if existing_user:
             raise EmailAlreadyExistsException("A user with this email already exists.")
+
+        clean_email = await verify_email_deliverability(clean_email)
 
         hashed_password = get_password_hash(password)
         otp = generate_otp()

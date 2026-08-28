@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 5
-    SIGNUP_OTP_EXPIRE_MINUTES: int = 5
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 7
+    SIGNUP_OTP_EXPIRE_MINUTES: int = 7
 
     # Redis / Cache / PubSub
     REDIS_URL: str = "redis://localhost:6379/0"

@@ -106,3 +106,28 @@ async def test_duplicate_email_signup_fails(async_client):
         },
     )
     assert dup_resp.status_code == 409  # EmailAlreadyExists
+
+
+@pytest.mark.asyncio
+async def test_invalid_syntax_email_signup_fails(async_client):
+    invalid_resp = await async_client.post(
+        "/api/v1/auth/register/request-otp",
+        json={
+            "email": "not-an-email",
+            "password": "Password123!",
+        },
+    )
+    assert invalid_resp.status_code in (400, 422)
+
+
+@pytest.mark.asyncio
+async def test_signup_otp_7_minute_expiry(async_client):
+    req_resp = await async_client.post(
+        "/api/v1/auth/register/request-otp",
+        json={
+            "email": "seven_min_expiry@genz.media",
+            "password": "Password123!",
+        },
+    )
+    assert req_resp.status_code == 200
+    assert req_resp.json()["expires_in"] == 420  # 7 minutes = 420 seconds

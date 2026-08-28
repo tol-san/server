@@ -26,7 +26,7 @@ async def store_password_reset_otp(
     email: str,
     user_id: uuid.UUID,
     otp: str,
-    expire_seconds: int = 300,  # 5 minutes default
+    expire_seconds: int = 420,  # 7 minutes default
 ) -> None:
     """
     Store 6-digit OTP in Redis with expiration time.
@@ -113,7 +113,7 @@ async def store_signup_otp(
     email: str,
     hashed_password: str,
     otp: str,
-    expire_seconds: int = 300,  # 5 minutes default
+    expire_seconds: int = 420,  # 7 minutes default
 ) -> None:
     """
     Store 6-digit OTP for pending user registration in Redis.

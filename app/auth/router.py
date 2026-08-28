@@ -50,7 +50,11 @@ async def request_signup_otp(
     service: AuthService = Depends(lambda: auth_service),
 ) -> SignupOtpResponse:
     otp, clean_email = await service.request_signup_otp(db, payload.email, payload.password)
-    background_tasks.add_task(send_signup_otp_email, clean_email, otp)
+    if settings.SMTP_HOST:
+        await send_signup_otp_email(clean_email, otp)
+    else:
+        background_tasks.add_task(send_signup_otp_email, clean_email, otp)
+
     return SignupOtpResponse(
         message="Verification code sent to your email address.",
         email=clean_email,

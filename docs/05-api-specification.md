@@ -37,13 +37,13 @@
 ### Authentication (`/api/v1/auth`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/v1/auth/register/request-otp` | Request 6-digit email registration OTP (5-min TTL) |
+| `POST` | `/api/v1/auth/register/request-otp` | Request 6-digit email registration OTP (7-min TTL, deliverability verified) |
 | `POST` | `/api/v1/auth/register/verify-otp` | Verify registration OTP, auto-generate unique username, and create user |
 | `POST` | `/api/v1/auth/register` | Direct user registration (legacy) |
 | `POST` | `/api/v1/auth/login` | Login and obtain access + refresh tokens |
 | `POST` | `/api/v1/auth/refresh` | Refresh expired access token |
 | `POST` | `/api/v1/auth/logout` | Revoke active refresh token and session |
-| `POST` | `/api/v1/auth/forgot-password` | Request password reset OTP via email (5-min TTL) |
+| `POST` | `/api/v1/auth/forgot-password` | Request password reset OTP via email (7-min TTL) |
 | `POST` | `/api/v1/auth/verify-otp` | Verify password reset OTP code |
 | `POST` | `/api/v1/auth/reset-password` | Reset password using verified token |
 | `POST` | `/api/v1/auth/change-password` | Change password for authenticated user |
