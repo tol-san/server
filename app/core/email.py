@@ -33,7 +33,9 @@ async def send_email(
 
     if text_content:
         message.set_content(text_content)
-    message.add_alternative(html_content, subtype="html")
+        message.add_alternative(html_content, subtype="html")
+    else:
+        message.set_content(html_content, subtype="html")
 
     try:
         username = settings.SMTP_USER if settings.SMTP_USER else None
