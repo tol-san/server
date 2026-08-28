@@ -94,6 +94,26 @@ class ForgotPasswordResponse(BaseModel):
     reset_token: Optional[str] = None
 
 
+class VerifyOtpRequest(BaseModel):
+    email: EmailStr = Field(..., description="Registered account email address")
+    otp: str = Field(
+        ...,
+        min_length=6,
+        max_length=6,
+        validation_alias=AliasChoices("otp", "token", "code"),
+        description="6-digit verification code",
+    )
+
+
+class VerifyOtpResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    reset_token: Optional[str] = None
+    user: UserResponse
+
+
 class ResetPasswordRequest(BaseModel):
     email: Optional[EmailStr] = Field(None, description="Registered account email address")
     token: str = Field(

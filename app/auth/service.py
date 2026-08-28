@@ -11,6 +11,8 @@ from app.auth.schemas import (
     TokenResponse,
     UserRegisterRequest,
     UserResponse,
+    VerifyOtpRequest,
+    VerifyOtpResponse,
 )
 from app.core.config import settings
 from app.core.exceptions import (
@@ -188,6 +190,36 @@ class AuthService:
             expire_seconds=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES * 60,
         )
         return otp, user.username
+
+    async def verify_otp(
+        self,
+        db: AsyncSession,
+        payload: VerifyOtpRequest,
+    ) -> VerifyOtpResponse:
+        clean_email = payload.email.lower().strip()
+        raw_otp = payload.otp.strip()
+
+        user_id = await verify_password_reset_otp(clean_email, raw_otp)
+        if not user_id:
+            raise UnauthorizedException("Invalid or expired verification code.")
+
+        user = await self.user_repo.get_by_id(db, user_id)
+        if not user or not user.is_active:
+            raise UnauthorizedException("User account is inactive or not found.")
+
+        # Authenticate session
+        access_token = create_access_token(user.id)
+        refresh_token, _ = create_refresh_token(user.id)
+        reset_token = create_password_reset_token(user.id, user.email)
+
+        return VerifyOtpResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            reset_token=reset_token,
+            user=UserResponse.model_validate(user),
+        )
 
     async def reset_password(
         self,

@@ -38,3 +38,47 @@ async def test_verify_wrong_otp_fails():
     # Wrong OTP
     verified_id = await verify_password_reset_otp(email, "654321")
     assert verified_id is None
+
+
+@pytest.mark.asyncio
+async def test_verify_otp_endpoint(async_client):
+    test_email = "otp_verify_flow@example.com"
+    # Register user
+    reg_resp = await async_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": test_email,
+            "username": "otp_flow_user",
+            "password": "Password123!",
+        },
+    )
+    assert reg_resp.status_code in (200, 201)
+
+    # 1. Request OTP
+    forgot_resp = await async_client.post(
+        "/api/v1/auth/forgot-password",
+        json={"email": test_email},
+    )
+    assert forgot_resp.status_code == 200
+    otp = forgot_resp.json()["reset_token"]
+    assert otp is not None
+    assert len(otp) == 6
+
+    # 2. Verify OTP endpoint -> logs in and returns tokens
+    verify_resp = await async_client.post(
+        "/api/v1/auth/verify-otp",
+        json={"email": test_email, "otp": otp},
+    )
+    assert verify_resp.status_code == 200
+    data = verify_resp.json()
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert "reset_token" in data
+    assert data["user"]["email"] == test_email
+
+    # 3. Invalid OTP returns 401
+    invalid_resp = await async_client.post(
+        "/api/v1/auth/verify-otp",
+        json={"email": test_email, "otp": "000000"},
+    )
+    assert invalid_resp.status_code == 401

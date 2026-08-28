@@ -14,6 +14,8 @@ from app.auth.schemas import (
     TokenResponse,
     UserRegisterRequest,
     UserResponse,
+    VerifyOtpRequest,
+    VerifyOtpResponse,
 )
 from app.auth.service import AuthService, auth_service
 from app.core.config import settings
@@ -108,6 +110,21 @@ async def forgot_password(
 
     message = "If this email is registered, verification instructions have been generated."
     return ForgotPasswordResponse(message=message, reset_token=reset_token)
+
+
+@router.post(
+    "/verify-otp",
+    response_model=VerifyOtpResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify 6-digit OTP verification code",
+    description="Validate the 6-digit verification code, authenticate the user session, and issue access tokens.",
+)
+async def verify_otp(
+    payload: VerifyOtpRequest,
+    db: AsyncSession = Depends(get_db),
+    service: AuthService = Depends(lambda: auth_service),
+) -> VerifyOtpResponse:
+    return await service.verify_otp(db, payload)
 
 
 @router.post(
