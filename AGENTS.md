@@ -30,3 +30,11 @@ This repository (`server/`) contains the FastAPI backend for GenZ Media.
 
 5. **Context7 MCP (`context7`)**:
    - Query latest official documentation and code snippets for FastAPI, SQLAlchemy 2.0, Alembic, Pydantic v2, and Python libraries.
+
+---
+
+## Development & Testing Workflow Rules
+- **Implement Tests on Changes**: Always implement relevant tests (Unit, Widget, or Integration test where appropriate) after implementing a new feature or making changes to prevent regressions.
+- **Pragmatic Testing**: Focus on critical business logic, API error handling, database constraints, and state transitions. It is not necessary to write exhaustive or redundant tests for every single detail.
+- **Verification**: Always run `uv run pytest` for the FastAPI backend before wrapping up changes.
+
