@@ -3,10 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: server-server:latest
     container_name: genz_media_server
     restart: unless-stopped
     ports:
       - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     env_file:
       - path: .env
         required: false

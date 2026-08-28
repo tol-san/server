@@ -25,6 +25,8 @@ async_session_maker = async_sessionmaker(
     autoflush=False,
 )
 
+AsyncSessionLocal = async_session_maker
+
 
 class Base(AsyncAttrs, DeclarativeBase):
     pass
