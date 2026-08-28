@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserRegisterRequest(BaseModel):
@@ -55,6 +55,7 @@ class UserResponse(BaseModel):
 class LoginRequest(BaseModel):
     identifier: str = Field(
         ...,
+        validation_alias=AliasChoices("identifier", "username", "username_or_email", "email"),
         min_length=1,
         description="User email address or username",
     )

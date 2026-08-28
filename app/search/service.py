@@ -59,8 +59,11 @@ class SearchService:
                 offset=offset,
             )
             hits = res.get("hits", [])
-            total = res.get("total", 0)
-            if hits or total > 0:
+            total = res.get("total") or 0
+            if current_uid and hits:
+                blocked_ids = await self.repo.get_blocked_user_ids(db, current_uid)
+                hits = [h for h in hits if str(h.get("id")) not in blocked_ids]
+            if hits:
                 items = [
                     UserSearchResult(
                         id=uuid.UUID(h["id"]) if isinstance(h["id"], str) else h["id"],
@@ -73,7 +76,7 @@ class SearchService:
                     for h in hits
                 ]
                 return PaginatedUserSearchResponse(
-                    items=items, total=total, limit=limit, offset=offset
+                    items=items, total=len(hits) if current_uid else total, limit=limit, offset=offset
                 )
 
         # 2. Fallback to SQL query
@@ -118,7 +121,7 @@ class SearchService:
                 offset=offset,
             )
             hits = res.get("hits", [])
-            total = res.get("total", 0)
+            total = res.get("total") or 0
             if hits or total > 0:
                 items = [
                     CommunitySearchResult(
@@ -183,8 +186,11 @@ class SearchService:
                 offset=offset,
             )
             hits = res.get("hits", [])
-            total = res.get("total", 0)
-            if hits or total > 0:
+            total = res.get("total") or 0
+            if current_uid and hits:
+                blocked_ids = await self.repo.get_blocked_user_ids(db, current_uid)
+                hits = [h for h in hits if str(h.get("author_id")) not in blocked_ids]
+            if hits:
                 items = [
                     PostSearchResult(
                         id=uuid.UUID(h["id"]) if isinstance(h["id"], str) else h["id"],
@@ -206,7 +212,7 @@ class SearchService:
                     for h in hits
                 ]
                 return PaginatedPostSearchResponse(
-                    items=items, total=total, limit=limit, offset=offset
+                    items=items, total=len(hits) if current_uid else total, limit=limit, offset=offset
                 )
 
         # 2. SQL Fallback
@@ -255,7 +261,7 @@ class SearchService:
                 offset=offset,
             )
             hits = res.get("hits", [])
-            total = res.get("total", 0)
+            total = res.get("total") or 0
             if hits or total > 0:
                 items = [
                     InterestSearchResult(

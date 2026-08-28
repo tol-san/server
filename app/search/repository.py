@@ -13,14 +13,12 @@ from app.users.models import Block, Follow, Profile, User
 class SearchRepository:
     """Repository handling SQL-based searches and full database extraction for index sync."""
 
-    def _get_blocked_subquery(self, user_id: Optional[uuid.UUID]):
+    def _get_blocked_conditions(self, col, user_id: Optional[uuid.UUID]):
         if not user_id:
-            return select(Block.blocked_id).where(Block.id.is_(None))
-        return (
-            select(Block.blocked_id)
-            .where(Block.blocker_id == user_id)
-            .union(select(Block.blocker_id).where(Block.blocked_id == user_id))
-        )
+            return []
+        sub1 = select(Block.blocked_id).where(Block.blocker_id == user_id)
+        sub2 = select(Block.blocker_id).where(Block.blocked_id == user_id)
+        return [col.not_in(sub1), col.not_in(sub2)]
 
     def _get_joined_communities_subquery(self, user_id: Optional[uuid.UUID]):
         if not user_id:
@@ -36,6 +34,19 @@ class SearchRepository:
             return select(Follow.following_id).where(Follow.id.is_(None))
         return select(Follow.following_id).where(Follow.follower_id == user_id)
 
+    async def get_blocked_user_ids(
+        self, db: AsyncSession, user_id: Optional[uuid.UUID]
+    ) -> set[str]:
+        if not user_id:
+            return set()
+        stmt1 = select(Block.blocked_id).where(Block.blocker_id == user_id)
+        stmt2 = select(Block.blocker_id).where(Block.blocked_id == user_id)
+        res1 = await db.execute(stmt1)
+        res2 = await db.execute(stmt2)
+        return {str(uid) for uid in res1.scalars().all()} | {
+            str(uid) for uid in res2.scalars().all()
+        }
+
     async def search_users(
         self,
         db: AsyncSession,
@@ -46,11 +57,10 @@ class SearchRepository:
         offset: int = 0,
     ) -> Tuple[Sequence[User], int]:
         clean_q = f"%{query.strip().lower()}%"
-        blocked_sub = self._get_blocked_subquery(current_user_id)
 
         filters = [
             User.is_active.is_(True),
-            User.id.not_in(blocked_sub),
+            *self._get_blocked_conditions(User.id, current_user_id),
             or_(
                 func.lower(User.username).like(clean_q),
                 func.lower(Profile.display_name).like(clean_q),
@@ -129,7 +139,6 @@ class SearchRepository:
         offset: int = 0,
     ) -> Tuple[Sequence[Post], int]:
         clean_q = f"%{query.strip().lower()}%"
-        blocked_sub = self._get_blocked_subquery(current_user_id)
         following_sub = self._get_following_subquery(current_user_id)
         joined_comm_sub = self._get_joined_communities_subquery(current_user_id)
 
@@ -155,7 +164,7 @@ class SearchRepository:
         )
 
         filters = [
-            Post.author_id.not_in(blocked_sub),
+            *self._get_blocked_conditions(Post.author_id, current_user_id),
             accessible_community,
             visibility_cond,
             or_(

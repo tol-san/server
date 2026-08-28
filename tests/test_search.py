@@ -169,32 +169,39 @@ async def test_search_type_filter_param(async_client: AsyncClient, db_session: A
 
 @pytest.mark.asyncio
 async def test_search_block_safety(async_client: AsyncClient):
-    user1 = await create_user(async_client, "safetyuser1", "safety1@example.com")
-    user2 = await create_user(async_client, "safetyuser2", "safety2@example.com")
+    import uuid
+    rand_id = uuid.uuid4().hex[:6]
+    u1_name = f"safetyuser1_{rand_id}"
+    u2_name = f"safetyuser2_{rand_id}"
+    user1 = await create_user(async_client, u1_name, f"{u1_name}@example.com")
+    user2 = await create_user(async_client, u2_name, f"{u2_name}@example.com")
+
+    test_key = f"SecretDoc_{rand_id}"
 
     # User2 creates a post
     await async_client.post(
         "/api/v1/posts",
         headers=user2["headers"],
-        json={"post_type": "text", "title": "Confidential Research Project", "content": "Top secret"},
+        json={"post_type": "text", "title": f"Confidential {test_key}", "content": "Top secret"},
     )
 
     # Before block: User1 can find User2's post
-    before_resp = await async_client.get("/api/v1/search/posts?q=Confidential", headers=user1["headers"])
+    before_resp = await async_client.get(f"/api/v1/search/posts?q={test_key}", headers=user1["headers"])
     assert before_resp.status_code == 200
-    assert any("Confidential" in p["title"] for p in before_resp.json()["items"])
+    print("[DEBUG TEST BEFORE_RESP]", before_resp.json())
+    assert any(test_key in p["title"] for p in before_resp.json()["items"])
 
     # User1 blocks User2
     await async_client.post(f"/api/v1/users/{user2['id']}/block", headers=user1["headers"])
 
     # After block: User1 CANNOT find User2 in user search or post search
-    after_post = await async_client.get("/api/v1/search/posts?q=Confidential", headers=user1["headers"])
+    after_post = await async_client.get(f"/api/v1/search/posts?q={test_key}", headers=user1["headers"])
     assert after_post.status_code == 200
-    assert not any("Confidential" in p["title"] for p in after_post.json()["items"])
+    assert not any(test_key in p["title"] for p in after_post.json()["items"])
 
-    after_user = await async_client.get("/api/v1/search/users?q=safetyuser2", headers=user1["headers"])
+    after_user = await async_client.get(f"/api/v1/search/users?q={u2_name}", headers=user1["headers"])
     assert after_user.status_code == 200
-    assert not any(u["username"] == "safetyuser2" for u in after_user.json()["items"])
+    assert not any(u["username"] == u2_name for u in after_user.json()["items"])
 
 
 @pytest.mark.asyncio

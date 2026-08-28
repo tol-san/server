@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -21,6 +22,13 @@ TestSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_meilisearch_healthy():
+    with patch("app.core.meilisearch.meilisearch_service.is_healthy", new_callable=AsyncMock) as m:
+        m.return_value = False
+        yield
 
 
 @pytest.fixture(autouse=True)
