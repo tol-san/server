@@ -60,7 +60,7 @@ class UserRepository:
         db.add(user)
         await db.flush()  # Flush to generate user.id
 
-        default_avatar = avatar_url or f"https://api.dicebear.com/7.x/critters/png?seed={username.strip()}"
+        default_avatar = avatar_url or f"https://api.dicebear.com/7.x/croodles/png?seed={username.strip()}"
 
         profile = Profile(
             user_id=user.id,
