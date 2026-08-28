@@ -20,6 +20,9 @@ class ProfileService:
         current_user: User,
     ) -> CurrentUserProfileResponse:
         profile = current_user.profile
+        from app.interests.repository import interest_repository
+        user_interests = await interest_repository.get_user_interests(db, current_user.id)
+        interest_names = [i.name for i in user_interests]
         return CurrentUserProfileResponse(
             id=current_user.id,
             email=current_user.email,
@@ -28,6 +31,7 @@ class ProfileService:
             display_name=profile.display_name if profile and profile.display_name else current_user.username,
             bio=profile.bio if profile else None,
             avatar_url=profile.avatar_url if profile else None,
+            interests=interest_names,
             follower_count=profile.follower_count if profile else 0,
             following_count=profile.following_count if profile else 0,
             post_count=profile.post_count if profile else 0,
@@ -58,6 +62,10 @@ class ProfileService:
             **updates,
         )
 
+        from app.interests.repository import interest_repository
+        user_interests = await interest_repository.get_user_interests(db, current_user.id)
+        interest_names = [i.name for i in user_interests]
+
         # Update Meilisearch index
         from app.core.meilisearch import meilisearch_service
         await meilisearch_service.index_user(
@@ -81,6 +89,7 @@ class ProfileService:
             display_name=profile.display_name if profile and profile.display_name else current_user.username,
             bio=profile.bio if profile else None,
             avatar_url=profile.avatar_url if profile else None,
+            interests=interest_names,
             follower_count=profile.follower_count if profile else 0,
             following_count=profile.following_count if profile else 0,
             post_count=profile.post_count if profile else 0,

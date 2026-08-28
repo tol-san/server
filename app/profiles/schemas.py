@@ -40,6 +40,7 @@ class CurrentUserProfileResponse(BaseModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
+    interests: list[str] = []
     follower_count: int = 0
     following_count: int = 0
     post_count: int = 0
