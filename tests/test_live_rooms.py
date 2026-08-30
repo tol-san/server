@@ -170,6 +170,7 @@ async def test_webhook_idempotency_returns_true_on_new_event():
     repo = LiveRoomRepository()
 
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None  # not seen before
     mock_db.execute = AsyncMock(return_value=mock_result)

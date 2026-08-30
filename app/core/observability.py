@@ -140,6 +140,10 @@ def configure_logging() -> None:
     root = logging.getLogger()
     root.setLevel(log_level)
     
+    # Suppress verbose internal transport/handshake chatter from third-party drivers
+    for noisy_logger in ("redis", "redis.asyncio", "asyncio", "urllib3", "httpcore", "httpx"):
+        logging.getLogger(noisy_logger).setLevel(logging.INFO)
+    
     if settings.LOG_FORMAT == "json":
         try:
             from pythonjsonlogger.json import JsonFormatter
