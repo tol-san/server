@@ -270,6 +270,43 @@ class CommunityService:
         await db.refresh(community)
         return CommunityResponse.model_validate(community)
 
+    async def upload_avatar_image(
+        self,
+        db: AsyncSession,
+        community_id: uuid.UUID,
+        current_user: User,
+        file: UploadFile,
+    ) -> CommunityResponse:
+        community = await self.community_repo.get_by_id(db, community_id)
+        if not community:
+            raise NotFoundException("Community not found.")
+
+        if community.owner_id != current_user.id and not current_user.is_superuser:
+            raise ForbiddenException("Only the community owner can update the avatar image.")
+
+        raw_bytes = await file.read()
+        if len(raw_bytes) > 5 * 1024 * 1024:
+            raise BadRequestException("Avatar image exceeds maximum size of 5MB.")
+
+        # Convert to WebP (max width 500px)
+        webp_bytes = storage_service.process_and_convert_to_webp(raw_bytes, max_dimension=500)
+
+        # Remove old avatar
+        if community.avatar_url:
+            await storage_service.delete_file_by_url(community.avatar_url)
+
+        object_name = f"communities/{community_id}/avatar_{uuid.uuid4()}.webp"
+        avatar_url = storage_service.upload_file(
+            file_data=webp_bytes,
+            object_name=object_name,
+            content_type="image/webp",
+        )
+
+        community.avatar_url = avatar_url
+        await db.commit()
+        await db.refresh(community)
+        return CommunityResponse.model_validate(community)
+
     # --- Memberships & Workflows ---
 
     async def join_community(

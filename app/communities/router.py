@@ -146,6 +146,23 @@ async def upload_community_cover(
 
 
 @router.post(
+    "/{community_id}/avatar",
+    response_model=CommunityResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload community avatar / logo",
+    description="Upload an avatar/logo image for the community (JPEG/PNG/WebP, max 5MB, Owner only).",
+)
+async def upload_community_avatar(
+    community_id: uuid.UUID,
+    file: UploadFile = File(..., description="Avatar/logo image file"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: CommunityService = Depends(lambda: community_service),
+) -> CommunityResponse:
+    return await service.upload_avatar_image(db, community_id, current_user, file)
+
+
+@router.post(
     "/{community_id}/join",
     response_model=JoinActionResponse,
     status_code=status.HTTP_200_OK,
