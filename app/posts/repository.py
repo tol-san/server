@@ -294,5 +294,38 @@ class PostRepository:
         result = await db.execute(stmt)
         return result.scalars().all(), total
 
+    async def list_post_reactors(
+        self,
+        db: AsyncSession,
+        post_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+        query: Optional[str] = None,
+    ) -> Tuple[Sequence[User], int]:
+        count_stmt = (
+            select(func.count(PostLike.id))
+            .where(PostLike.post_id == post_id)
+        )
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        stmt = (
+            select(User)
+            .join(PostLike, PostLike.user_id == User.id)
+            .where(PostLike.post_id == post_id)
+            .options(selectinload(User.profile))
+        )
+        if query and query.strip():
+            q = f"%{query.strip().lower()}%"
+            stmt = stmt.join(Profile, Profile.user_id == User.id, isouter=True).where(
+                or_(
+                    func.lower(User.username).like(q),
+                    func.lower(Profile.display_name).like(q),
+                )
+            )
+
+        stmt = stmt.order_by(PostLike.created_at.desc()).offset(offset).limit(limit)
+        result = await db.execute(stmt)
+        return result.scalars().all(), total
+
 
 post_repository = PostRepository()

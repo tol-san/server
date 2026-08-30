@@ -11,6 +11,7 @@ from app.posts.schemas import (
     PaginatedPostsResponse,
     PostCreateRequest,
     PostLikeResponse,
+    PostReactionsResponse,
     PostResponse,
     PostSaveResponse,
     PostShareResponse,
@@ -178,6 +179,33 @@ async def unlike_post(
     service: PostService = Depends(lambda: post_service),
 ) -> PostLikeResponse:
     return await service.unlike_post(db, post_id, current_user)
+
+
+@router.get(
+    "/{post_id}/reactions",
+    response_model=PostReactionsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List users who reacted to a post",
+    description="Retrieve paginated list of reactor profiles and reaction counts for a post.",
+)
+@router.get(
+    "/{post_id}/likes",
+    response_model=PostReactionsResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def list_post_reactions(
+    post_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, description="Search reactor name or username"),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    service: PostService = Depends(lambda: post_service),
+) -> PostReactionsResponse:
+    return await service.list_post_reactors(
+        db, post_id, current_user=current_user, limit=limit, offset=offset, query=q
+    )
 
 
 @router.post(

@@ -17,10 +17,12 @@ from app.posts.schemas import (
     PostCommunityResponse,
     PostCreateRequest,
     PostLikeResponse,
+    PostReactionsResponse,
     PostResponse,
     PostSaveResponse,
     PostShareResponse,
     PostUpdateRequest,
+    ReactorUserResponse,
 )
 from app.users.models import User
 
@@ -366,6 +368,58 @@ class PostService:
         items = [map_post_to_response(p) for p in posts]
         return PaginatedSavedPostsResponse(
             items=items, total=total, limit=limit, offset=offset
+        )
+
+    async def list_post_reactors(
+        self,
+        db: AsyncSession,
+        post_id: uuid.UUID,
+        current_user: Optional[User] = None,
+        limit: int = 50,
+        offset: int = 0,
+        query: Optional[str] = None,
+    ) -> PostReactionsResponse:
+        post = await self.post_repo.get_by_id(db, post_id)
+        if not post:
+            raise NotFoundException("Post not found.")
+
+        users, total = await self.post_repo.list_post_reactors(
+            db, post_id=post_id, limit=limit, offset=offset, query=query
+        )
+
+        items = []
+        for u in users:
+            display_name = u.profile.display_name if u.profile else u.username
+            avatar_url = u.profile.avatar_url if u.profile else None
+            items.append(
+                ReactorUserResponse(
+                    id=u.id,
+                    username=u.username,
+                    display_name=display_name,
+                    avatar_url=avatar_url,
+                    reaction_type="like",
+                    mutual_count=0,
+                    is_following=False,
+                )
+            )
+
+        counts = {
+            "all": total,
+            "like": total,
+            "love": 0,
+            "care": 0,
+            "haha": 0,
+            "wow": 0,
+            "sad": 0,
+            "angry": 0,
+        }
+
+        return PostReactionsResponse(
+            items=items,
+            total=total,
+            counts=counts,
+            limit=limit,
+            offset=offset,
         )
 
 

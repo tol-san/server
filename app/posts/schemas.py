@@ -117,3 +117,21 @@ class PaginatedSavedPostsResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class ReactorUserResponse(BaseModel):
+    id: uuid.UUID
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    reaction_type: str = "like"
+    mutual_count: int = 0
+    is_following: bool = False
+
+
+class PostReactionsResponse(BaseModel):
+    items: List[ReactorUserResponse]
+    total: int
+    counts: dict
+    limit: int
+    offset: int
