@@ -372,17 +372,17 @@ class AuthService:
         payload: ResetPasswordRequest,
     ) -> None:
         user_id: Optional[uuid.UUID] = None
-        raw_token = payload.token.strip()
+        raw_token = payload.token.strip() if payload.token else ""
 
         # 1. Try OTP verification (works with or without email)
         if len(raw_token) == 6 and raw_token.isdigit():
             user_id = await verify_password_reset_otp(str(payload.email) if payload.email else None, raw_token)
 
-        # 2. If not found, try JWT token verification for backward compatibility
-        if not user_id:
+        # 2. If not found, try JWT token verification (supports password_reset & access tokens)
+        if not user_id and raw_token:
             try:
                 token_payload = decode_token(raw_token)
-                if token_payload.get("type") == "password_reset":
+                if token_payload.get("type") in ("password_reset", "access"):
                     user_id_str = token_payload.get("sub")
                     if user_id_str:
                         user_id = uuid.UUID(user_id_str)
