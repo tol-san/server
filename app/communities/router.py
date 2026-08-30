@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_active_user, get_current_user
+from app.auth.dependencies import get_current_active_user, get_current_user, get_optional_current_user
 from app.communities.schemas import (
     CommunityCreateRequest,
     CommunityDetailResponse,
@@ -90,9 +90,10 @@ async def get_my_communities(
 async def get_community(
     community_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     service: CommunityService = Depends(lambda: community_service),
 ) -> CommunityDetailResponse:
-    return await service.get_community(db, community_id, current_user=None)
+    return await service.get_community(db, community_id, current_user=current_user)
 
 
 @router.patch(
