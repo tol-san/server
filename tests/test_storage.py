@@ -42,7 +42,7 @@ async def test_storage_service_upload_and_delete():
     test_content = b"fake image byte content"
     object_name = "test/sample_image.png"
 
-    url = storage_service.upload_file(
+    url = await storage_service.upload_file(
         file_data=test_content,
         object_name=object_name,
         content_type="image/png",

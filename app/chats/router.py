@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Optional
 
@@ -25,7 +26,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_active_user
 from app.chats.connection_manager import connection_manager
 from app.chats.presence import presence_manager
 from app.chats.schemas import (
@@ -41,7 +42,7 @@ from app.chats.service import ChatService, chat_service
 from app.communities.repository import community_repository
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import AppException, ForbiddenException, NotFoundException
 from app.core.observability import CHAT_WS_CONNECTIONS
 from app.core.redis import get_redis_client
 from app.users.models import User
@@ -60,7 +61,7 @@ _HEARTBEAT_INTERVAL = 30  # seconds
 async def issue_ws_ticket(
     community_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Issue a short-lived one-time WebSocket ticket for the given community."""
     # Verify membership before issuing ticket
@@ -93,7 +94,7 @@ async def get_chat_history(
     before: Optional[str] = Query(None, description="Opaque cursor for pagination"),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
     service: ChatService = Depends(lambda: chat_service),
 ):
     """Fetch message history using cursor/keyset pagination (newest-first)."""
@@ -114,7 +115,7 @@ async def get_chat_history(
 async def get_presence(
     community_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Return online member IDs for a community chat."""
     member = await community_repository.get_membership(
@@ -171,8 +172,15 @@ async def chat_websocket(
     from app.users.repository import user_repository
     import uuid as _uuid
     current_user = await user_repository.get_by_id(db, _uuid.UUID(user_id_str))
-    if not current_user:
+    if not current_user or not current_user.is_active:
         await ws.close(code=4001, reason="User not found")
+        return
+
+    member = await community_repository.get_membership(
+        db, community_id=community_id, user_id=current_user.id
+    )
+    if not member:
+        await ws.close(code=4003, reason="Community membership required")
         return
 
     # 2. Accept connection
@@ -191,6 +199,7 @@ async def chat_websocket(
     )
     await presence_manager.join(comm_id_str, connection_id, user_id)
     CHAT_WS_CONNECTIONS.labels(community_id=comm_id_str).inc()
+    last_heartbeat = time.monotonic()
 
     # Announce presence
     presence_event = WsOutgoing(
@@ -204,6 +213,9 @@ async def chat_websocket(
         while ws.client_state == WebSocketState.CONNECTED:
             await asyncio.sleep(_HEARTBEAT_INTERVAL)
             try:
+                if time.monotonic() - last_heartbeat > _HEARTBEAT_INTERVAL * 3:
+                    await ws.close(code=4008, reason="Heartbeat timeout")
+                    break
                 await ws.send_text(
                     WsOutgoing(type=WsEventType.HEARTBEAT).to_json()
                 )
@@ -246,12 +258,21 @@ async def chat_websocket(
                             payload=msg_resp.model_dump(mode="json"),
                         ).to_json()
                     )
-                except Exception as exc:
+                except AppException as exc:
                     await ws.send_text(
                         WsOutgoing(
                             type=WsEventType.ERROR,
                             request_id=incoming.request_id,
-                            payload={"detail": str(exc)},
+                            payload={"detail": exc.message, "error_code": exc.error_code},
+                        ).to_json()
+                    )
+                except Exception:
+                    logger.exception("Unexpected chat message error for connection %s", connection_id)
+                    await ws.send_text(
+                        WsOutgoing(
+                            type=WsEventType.ERROR,
+                            request_id=incoming.request_id,
+                            payload={"detail": "Unable to process the message."},
                         ).to_json()
                     )
 
@@ -264,6 +285,7 @@ async def chat_websocket(
                 )
 
             elif incoming.type == WsEventType.HEARTBEAT:
+                last_heartbeat = time.monotonic()
                 await presence_manager.heartbeat(comm_id_str, connection_id)
 
     except WebSocketDisconnect:

@@ -80,6 +80,15 @@ class TooManyRequestsException(AppException):
         )
 
 
+class ServiceUnavailableException(AppException):
+    def __init__(self, message: str = "A required service is temporarily unavailable."):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            error_code="SERVICE_UNAVAILABLE",
+        )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnauthorizedException)
     async def unauthorized_exception_handler(request: Request, exc: UnauthorizedException):

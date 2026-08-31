@@ -74,30 +74,19 @@ async def list_posts(
     current_user: Optional[User] = Depends(get_optional_current_user),
     service: PostService = Depends(lambda: post_service),
 ) -> PaginatedPostsResponse:
-    effective_author_id = author_id
-    effective_visibility = visibility
-
-    if current_user is None:
-        # Anonymous users can only view public posts
-        if visibility and visibility != "public":
-            raise ForbiddenException("Authentication required to view non-public posts.")
-        effective_visibility = "public"
-    else:
-        # Authenticated users: restrict private posts to their own
-        if visibility == "private":
-            effective_author_id = current_user.id
-        elif visibility == "followers_only" and author_id is None:
-            effective_author_id = current_user.id
+    if current_user is None and visibility and visibility != "public":
+        raise ForbiddenException("Authentication required to view non-public posts.")
 
     return await service.list_posts(
         db,
-        author_id=effective_author_id,
+        author_id=author_id,
         community_id=community_id,
         post_type=post_type,
-        visibility=effective_visibility,
+        visibility=visibility,
         search=search,
         limit=limit,
         offset=offset,
+        current_user=current_user,
     )
 
 
@@ -111,9 +100,10 @@ async def list_posts(
 async def get_post(
     post_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     service: PostService = Depends(lambda: post_service),
 ) -> PostResponse:
-    return await service.get_post(db, post_id)
+    return await service.get_post(db, post_id, current_user)
 
 
 @router.patch(
@@ -254,4 +244,3 @@ async def share_post(
     service: PostService = Depends(lambda: post_service),
 ) -> PostShareResponse:
     return await service.share_post(db, post_id, current_user)
-

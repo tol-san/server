@@ -61,12 +61,16 @@ Forgot Password
    ↓
 Request reset
    ↓
-Backend/email token process
+Verify email-bound OTP
    ↓
-Reset Password
+Receive one-time reset-only token
    ↓
-Success → Login
+Reset Password → Login
 ```
+
+OTP verification does not create an authenticated session and does not return
+access or refresh tokens. The reset token is short-lived and consumed once by
+the password-reset endpoint; successful reset invalidates existing sessions.
 
 ## Interest onboarding
 

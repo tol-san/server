@@ -43,7 +43,9 @@ async def store_password_reset_otp(
 ) -> None:
     """
     Store 6-digit OTP in Redis with expiration time.
-    Indexed by both email and OTP code for flexible verification.
+    The code is bound to the normalized email address. It is deliberately not
+    indexed globally by code because a six-digit value is not an account
+    identifier and must never be sufficient to choose a reset target.
     """
     clean_email = email.lower().strip()
     data = {
@@ -59,68 +61,97 @@ async def store_password_reset_otp(
             json.dumps(data),
             ex=expire_seconds,
         )
-        await client.set(
-            f"otp:code:{otp}",
-            json.dumps(data),
-            ex=expire_seconds,
-        )
         logger.debug("[OTP] Stored reset OTP in Redis for %s (TTL: %ds)", clean_email, expire_seconds)
     except Exception as exc:
         logger.warning("[OTP] Redis store failed, falling back to memory: %s", exc)
         _cleanup_in_memory_otp()
         _in_memory_otp[clean_email] = (data, time.time() + expire_seconds)
-        _in_memory_otp[f"code:{otp}"] = (data, time.time() + expire_seconds)
 
 
 async def verify_password_reset_otp(
-    email: Optional[str],
+    email: str,
     otp: str,
 ) -> Optional[uuid.UUID]:
     """
-    Verify the 6-digit OTP for the given email address or OTP code.
+    Verify the 6-digit OTP for the given email address.
     If valid, consumes the OTP (deletes it) and returns the associated user_id.
     """
-    clean_email = email.lower().strip() if email else None
+    clean_email = email.lower().strip()
     clean_otp = otp.strip()
 
     # 1. Check fallback in-memory cache
-    if clean_email and clean_email in _in_memory_otp:
+    if clean_email in _in_memory_otp:
         data, expires_at = _in_memory_otp[clean_email]
         if time.time() < expires_at and data.get("otp") == clean_otp:
             del _in_memory_otp[clean_email]
-            if f"code:{clean_otp}" in _in_memory_otp:
-                del _in_memory_otp[f"code:{clean_otp}"]
-            return uuid.UUID(data["user_id"])
-    elif f"code:{clean_otp}" in _in_memory_otp:
-        data, expires_at = _in_memory_otp[f"code:{clean_otp}"]
-        if time.time() < expires_at:
-            del _in_memory_otp[f"code:{clean_otp}"]
-            if data.get("email") and data["email"] in _in_memory_otp:
-                del _in_memory_otp[data["email"]]
             return uuid.UUID(data["user_id"])
 
     # 2. Check Redis
     try:
         client: aioredis.Redis = get_redis_client()
-        raw_data = None
-        if clean_email:
-            raw_data = await client.get(f"otp:reset:{clean_email}")
-        if not raw_data:
-            raw_data = await client.get(f"otp:code:{clean_otp}")
+        raw_data = await client.get(f"otp:reset:{clean_email}")
 
         if not raw_data:
             return None
 
         data = json.loads(raw_data)
         if data.get("otp") == clean_otp:
-            if data.get("email"):
-                await client.delete(f"otp:reset:{data['email']}")
-            await client.delete(f"otp:code:{clean_otp}")
+            await client.delete(f"otp:reset:{clean_email}")
             return uuid.UUID(data["user_id"])
         return None
     except Exception as exc:
         logger.warning("[OTP] Redis verify check failed: %s", exc)
         return None
+
+
+async def store_password_reset_grant(
+    jti: str,
+    user_id: uuid.UUID,
+    email: str,
+    expire_seconds: int,
+) -> None:
+    """Persist a one-time grant backing a signed password-reset JWT."""
+    key = f"password-reset-grant:{jti}"
+    data = {"user_id": str(user_id), "email": email.lower().strip()}
+    try:
+        client: aioredis.Redis = get_redis_client()
+        await client.set(key, json.dumps(data), ex=expire_seconds)
+    except Exception as exc:
+        logger.warning("Password reset grant store failed, using memory: %s", exc)
+        _cleanup_in_memory_otp()
+        _in_memory_otp[key] = (data, time.time() + expire_seconds)
+
+
+async def consume_password_reset_grant(
+    jti: str,
+    user_id: uuid.UUID,
+    email: str,
+) -> bool:
+    """Atomically consume and validate a one-time password-reset grant."""
+    key = f"password-reset-grant:{jti}"
+    expected_email = email.lower().strip()
+
+    if key in _in_memory_otp:
+        data, expires_at = _in_memory_otp.pop(key)
+        return (
+            time.time() < expires_at
+            and data.get("user_id") == str(user_id)
+            and data.get("email") == expected_email
+        )
+
+    try:
+        client: aioredis.Redis = get_redis_client()
+        raw_data = await client.getdel(key)
+        if not raw_data:
+            return False
+        data = json.loads(raw_data)
+        return (
+            data.get("user_id") == str(user_id)
+            and data.get("email") == expected_email
+        )
+    except Exception as exc:
+        logger.warning("Password reset grant consume failed: %s", exc)
+        return False
 
 
 async def store_signup_otp(

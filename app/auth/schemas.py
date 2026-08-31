@@ -138,20 +138,14 @@ class VerifyOtpRequest(BaseModel):
 
 
 class VerifyOtpResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
+    reset_token: str
     expires_in: int
-    reset_token: Optional[str] = None
-    user: UserResponse
 
 
 class ResetPasswordRequest(BaseModel):
-    email: Optional[EmailStr] = Field(None, description="Registered account email address")
     token: str = Field(
         ...,
-        validation_alias=AliasChoices("token", "otp", "code"),
-        description="Password reset verification token or 6-digit OTP",
+        description="One-time password reset token issued after OTP verification",
     )
     new_password: str = Field(
         ...,

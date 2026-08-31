@@ -7,6 +7,7 @@ from app.communities.repository import CommunityRepository, community_repository
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.core.storage import storage_service
 from app.posts.models import Post
+from app.posts.access import require_post_view
 from app.posts.repository import PostRepository, post_repository
 from app.posts.schemas import (
     MediaItemResponse,
@@ -30,7 +31,41 @@ ALLOWED_POST_TYPES = {"text", "image", "video"}
 ALLOWED_VISIBILITY = {"public", "followers_only", "private"}
 
 
-def map_post_to_response(post: Post) -> PostResponse:
+async def sync_post_search_index(post: Post) -> None:
+    """Keep only globally discoverable posts in the external search index."""
+    from app.core.meilisearch import meilisearch_service
+
+    is_indexable = post.visibility == "public" and (
+        post.community is None or not post.community.is_private
+    )
+    if not is_indexable:
+        await meilisearch_service.delete_post(post.id)
+        return
+
+    await meilisearch_service.index_post(
+        {
+            "id": str(post.id),
+            "title": post.title,
+            "content": post.content,
+            "post_type": post.post_type,
+            "visibility": post.visibility,
+            "author_id": str(post.author_id),
+            "author_username": post.author.username if post.author else None,
+            "community_id": str(post.community_id) if post.community_id else None,
+            "community_name": post.community.name if post.community else None,
+            "like_count": post.like_count,
+            "comment_count": post.comment_count,
+            "created_at": post.created_at.isoformat() if post.created_at else None,
+        }
+    )
+
+
+def map_post_to_response(
+    post: Post,
+    *,
+    is_liked: bool = False,
+    is_saved: bool = False,
+) -> PostResponse:
     author = PostAuthorResponse(
         id=post.author.id,
         username=post.author.username,
@@ -49,8 +84,8 @@ def map_post_to_response(post: Post) -> PostResponse:
         MediaItemResponse(
             id=m.id,
             media_type=m.media_type,
-            url=m.url,
-            thumbnail_url=m.thumbnail_url,
+            url=storage_service.get_post_media_url(m.url),
+            thumbnail_url=storage_service.get_post_media_url(m.thumbnail_url),
             duration=m.duration,
             width=m.width,
             height=m.height,
@@ -71,6 +106,8 @@ def map_post_to_response(post: Post) -> PostResponse:
         comment_count=post.comment_count,
         share_count=post.share_count,
         save_count=post.save_count,
+        is_liked=is_liked,
+        is_saved=is_saved,
         created_at=post.created_at,
     )
 
@@ -121,6 +158,35 @@ class PostService:
             if not payload.media or len(payload.media) != 1:
                 raise BadRequestException("Video post must contain exactly one video.")
 
+        normalized_media = None
+        if payload.media:
+            normalized_media = []
+            for item in payload.media:
+                if item.media_type not in {"image", "video"}:
+                    raise BadRequestException("Media type must be image or video.")
+                if item.media_type != payload.post_type:
+                    raise BadRequestException(
+                        "Every media item must match the post type."
+                    )
+                normalized_media.append(
+                    item.model_copy(
+                        update={
+                            "url": storage_service.normalize_owned_post_media_url(
+                                current_user.id, item.url, item.media_type
+                            ),
+                            "thumbnail_url": (
+                                storage_service.normalize_owned_post_media_url(
+                                    current_user.id,
+                                    item.thumbnail_url,
+                                    "image",
+                                )
+                                if item.thumbnail_url
+                                else None
+                            ),
+                        }
+                    )
+                )
+
         # 5. Persist post
         post = await self.post_repo.create(
             db,
@@ -130,26 +196,10 @@ class PostService:
             title=payload.title,
             content=payload.content,
             visibility=payload.visibility,
-            media=payload.media,
+            media=normalized_media,
         )
 
-        from app.core.meilisearch import meilisearch_service
-        await meilisearch_service.index_post(
-            {
-                "id": str(post.id),
-                "title": post.title,
-                "content": post.content,
-                "post_type": post.post_type,
-                "visibility": post.visibility,
-                "author_id": str(post.author_id),
-                "author_username": current_user.username,
-                "community_id": str(post.community_id) if post.community_id else None,
-                "community_name": post.community.name if post.community else None,
-                "like_count": post.like_count,
-                "comment_count": post.comment_count,
-                "created_at": post.created_at.isoformat() if post.created_at else None,
-            }
-        )
+        await sync_post_search_index(post)
 
         return map_post_to_response(post)
 
@@ -157,11 +207,20 @@ class PostService:
         self,
         db: AsyncSession,
         post_id: uuid.UUID,
+        current_user: Optional[User] = None,
     ) -> PostResponse:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
-        return map_post_to_response(post)
+        await require_post_view(db, post, current_user)
+        is_liked = is_saved = False
+        if current_user:
+            liked, saved = await self.post_repo.get_viewer_engagement(
+                db, current_user.id, [post.id]
+            )
+            is_liked = post.id in liked
+            is_saved = post.id in saved
+        return map_post_to_response(post, is_liked=is_liked, is_saved=is_saved)
 
     async def update_post(
         self,
@@ -183,23 +242,7 @@ class PostService:
         updates = payload.model_dump(exclude_unset=True)
         updated_post = await self.post_repo.update(db, post, **updates)
 
-        from app.core.meilisearch import meilisearch_service
-        await meilisearch_service.index_post(
-            {
-                "id": str(updated_post.id),
-                "title": updated_post.title,
-                "content": updated_post.content,
-                "post_type": updated_post.post_type,
-                "visibility": updated_post.visibility,
-                "author_id": str(updated_post.author_id),
-                "author_username": updated_post.author.username if updated_post.author else None,
-                "community_id": str(updated_post.community_id) if updated_post.community_id else None,
-                "community_name": updated_post.community.name if updated_post.community else None,
-                "like_count": updated_post.like_count,
-                "comment_count": updated_post.comment_count,
-                "created_at": updated_post.created_at.isoformat() if updated_post.created_at else None,
-            }
-        )
+        await sync_post_search_index(updated_post)
 
         return map_post_to_response(updated_post)
 
@@ -245,6 +288,7 @@ class PostService:
         search: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
+        current_user: Optional[User] = None,
     ) -> PaginatedPostsResponse:
         posts, total = await self.post_repo.list_posts(
             db,
@@ -253,10 +297,25 @@ class PostService:
             post_type=post_type,
             visibility=visibility,
             search=search,
+            viewer_id=current_user.id if current_user else None,
+            viewer_is_superuser=bool(current_user and current_user.is_superuser),
             limit=limit,
             offset=offset,
         )
-        items = [map_post_to_response(p) for p in posts]
+        liked: set[uuid.UUID] = set()
+        saved: set[uuid.UUID] = set()
+        if current_user:
+            liked, saved = await self.post_repo.get_viewer_engagement(
+                db, current_user.id, [post.id for post in posts]
+            )
+        items = [
+            map_post_to_response(
+                post,
+                is_liked=post.id in liked,
+                is_saved=post.id in saved,
+            )
+            for post in posts
+        ]
         return PaginatedPostsResponse(items=items, total=total, limit=limit, offset=offset)
 
     async def upload_media(
@@ -278,6 +337,7 @@ class PostService:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         liked, count = await self.post_repo.like_post(db, current_user.id, post)
         from app.core.cache import cache_service
@@ -307,6 +367,7 @@ class PostService:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         liked, count = await self.post_repo.unlike_post(db, current_user.id, post)
         from app.core.cache import cache_service
@@ -322,6 +383,7 @@ class PostService:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         saved, count = await self.post_repo.save_post(db, current_user.id, post)
         return PostSaveResponse(post_id=post.id, saved=saved, save_count=count)
@@ -335,6 +397,7 @@ class PostService:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         saved, count = await self.post_repo.unsave_post(db, current_user.id, post)
         return PostSaveResponse(post_id=post.id, saved=saved, save_count=count)
@@ -348,6 +411,7 @@ class PostService:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         from app.core.cache import cache_service
         await cache_service.incr(f"cache:post:{post.id}:shares")
@@ -363,9 +427,19 @@ class PostService:
         offset: int = 0,
     ) -> PaginatedSavedPostsResponse:
         posts, total = await self.post_repo.list_saved_posts(
-            db, user_id=current_user.id, limit=limit, offset=offset
+            db,
+            user_id=current_user.id,
+            limit=limit,
+            offset=offset,
+            viewer_is_superuser=current_user.is_superuser,
         )
-        items = [map_post_to_response(p) for p in posts]
+        liked, _ = await self.post_repo.get_viewer_engagement(
+            db, current_user.id, [post.id for post in posts]
+        )
+        items = [
+            map_post_to_response(post, is_liked=post.id in liked, is_saved=True)
+            for post in posts
+        ]
         return PaginatedSavedPostsResponse(
             items=items, total=total, limit=limit, offset=offset
         )
@@ -382,6 +456,7 @@ class PostService:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         users, total = await self.post_repo.list_post_reactors(
             db, post_id=post_id, limit=limit, offset=offset, query=query

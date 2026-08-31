@@ -1,10 +1,12 @@
 import uuid
 from typing import Optional, Sequence, Tuple
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.communities.models import Community, CommunityJoinRequest, CommunityMembership
+from app.communities.access import community_access_filters
 from app.users.models import Profile, User
 
 
@@ -101,10 +103,14 @@ class CommunityRepository:
         search: Optional[str] = None,
         interest_id: Optional[uuid.UUID] = None,
         is_private: Optional[bool] = None,
+        viewer_id: Optional[uuid.UUID] = None,
+        viewer_is_superuser: bool = False,
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[Sequence[Community], int]:
-        filters = []
+        filters = community_access_filters(
+            viewer_id, is_superuser=viewer_is_superuser
+        )
         if search:
             search_clean = f"%{search.strip().lower()}%"
             filters.append(
@@ -198,13 +204,21 @@ class CommunityRepository:
             user_id=user_id,
             role=role,
         )
-        db.add(membership)
+        try:
+            async with db.begin_nested():
+                db.add(membership)
+                await db.flush()
+        except IntegrityError:
+            existing = await self.get_membership(db, community_id, user_id)
+            if existing:
+                return existing
+            raise
 
-        community = (await db.execute(select(Community).where(Community.id == community_id))).scalar_one_or_none()
-        if community:
-            community.member_count += 1
-            db.add(community)
-
+        await db.execute(
+            update(Community)
+            .where(Community.id == community_id)
+            .values(member_count=Community.member_count + 1)
+        )
         await db.commit()
         await db.refresh(membership)
         return membership
@@ -215,17 +229,30 @@ class CommunityRepository:
         community_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> bool:
-        membership = await self.get_membership(db, community_id, user_id)
-        if not membership:
+        removed_id = (
+            await db.execute(
+                delete(CommunityMembership)
+                .where(
+                    CommunityMembership.community_id == community_id,
+                    CommunityMembership.user_id == user_id,
+                )
+                .returning(CommunityMembership.id)
+            )
+        ).scalar_one_or_none()
+        if removed_id is None:
+            await db.rollback()
             return False
 
-        await db.delete(membership)
-
-        community = (await db.execute(select(Community).where(Community.id == community_id))).scalar_one_or_none()
-        if community:
-            community.member_count = max(0, community.member_count - 1)
-            db.add(community)
-
+        await db.execute(
+            update(Community)
+            .where(Community.id == community_id)
+            .values(
+                member_count=case(
+                    (Community.member_count > 0, Community.member_count - 1),
+                    else_=0,
+                )
+            )
+        )
         await db.commit()
         return True
 

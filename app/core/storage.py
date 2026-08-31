@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import logging
+from datetime import timedelta
 from typing import BinaryIO, Optional, Union
 from urllib.parse import urlparse
 import uuid
@@ -11,7 +12,7 @@ from minio.error import S3Error
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.config import settings
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, ServiceUnavailableException
 
 logger = logging.getLogger(__name__)
 
@@ -62,15 +63,19 @@ class StorageService:
             )
         return self._client
 
-    def ensure_bucket_exists(self, bucket_name: Optional[str] = None) -> None:
-        """Create bucket if it doesn't exist and set public read policy for media."""
+    def ensure_bucket_exists(
+        self, bucket_name: Optional[str] = None, *, public_assets: bool = True
+    ) -> None:
+        """Create a bucket and enforce its intended read policy."""
         bucket = bucket_name or settings.MINIO_BUCKET_NAME
         try:
             if not self.client.bucket_exists(bucket):
                 self.client.make_bucket(bucket)
                 logger.info("Created MinIO bucket: %s", bucket)
 
-                # Set public read access policy on bucket
+            if public_assets:
+                # Only profile/community presentation assets are anonymous. Post
+                # media is always served with a short-lived signed URL.
                 policy = {
                     "Version": "2012-10-17",
                     "Statement": [
@@ -78,14 +83,23 @@ class StorageService:
                             "Effect": "Allow",
                             "Principal": {"AWS": ["*"]},
                             "Action": ["s3:GetObject"],
-                            "Resource": [f"arn:aws:s3:::{bucket}/*"],
+                            "Resource": [
+                                f"arn:aws:s3:::{bucket}/avatars/*",
+                                f"arn:aws:s3:::{bucket}/communities/*",
+                            ],
                         }
                     ],
                 }
                 self.client.set_bucket_policy(bucket, json.dumps(policy))
-                logger.info("Applied public read policy to bucket: %s", bucket)
+            else:
+                try:
+                    self.client.delete_bucket_policy(bucket)
+                except S3Error as exc:
+                    if exc.code not in {"NoSuchBucketPolicy", "NoSuchBucket"}:
+                        raise
         except Exception as exc:
-            logger.warning("MinIO bucket initialization failed or offline: %s", exc)
+            logger.error("MinIO bucket initialization failed: %s", exc)
+            raise ServiceUnavailableException("Media storage is temporarily unavailable.") from exc
 
     def process_and_convert_to_webp(
         self,
@@ -116,14 +130,16 @@ class StorageService:
         except UnidentifiedImageError:
             raise BadRequestException("The uploaded file is not a valid or readable image.")
         except Exception as exc:
-            raise BadRequestException(f"Failed to process image file: {str(exc)}")
+            logger.info("Rejected image during safe decoding: %s", exc)
+            raise BadRequestException("The uploaded image could not be processed safely.")
 
-    def upload_file(
+    def _upload_file_sync(
         self,
         file_data: Union[bytes, BinaryIO],
         object_name: str,
         content_type: str,
         bucket_name: Optional[str] = None,
+        public_assets: bool = True,
     ) -> str:
         """Upload a file or byte stream to MinIO and return its public URL."""
         bucket = bucket_name or settings.MINIO_BUCKET_NAME
@@ -138,7 +154,7 @@ class StorageService:
             file_data.seek(0)
 
         try:
-            self.ensure_bucket_exists(bucket)
+            self.ensure_bucket_exists(bucket, public_assets=public_assets)
             self.client.put_object(
                 bucket_name=bucket,
                 object_name=object_name,
@@ -146,10 +162,68 @@ class StorageService:
                 length=length,
                 content_type=content_type,
             )
-            return f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/{bucket}/{object_name}"
+            if public_assets:
+                return f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/{bucket}/{object_name}"
+            return f"s3://{bucket}/{object_name}"
         except Exception as exc:
-            logger.warning("MinIO upload failed: %s, returning fallback URL", exc)
-            return f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/{bucket}/{object_name}"
+            if isinstance(exc, ServiceUnavailableException):
+                raise
+            logger.error("MinIO upload failed: %s", exc)
+            raise ServiceUnavailableException("Media upload failed.") from exc
+
+    async def upload_file(
+        self,
+        file_data: Union[bytes, BinaryIO],
+        object_name: str,
+        content_type: str,
+        bucket_name: Optional[str] = None,
+        public_assets: bool = True,
+    ) -> str:
+        return await asyncio.to_thread(
+            self._upload_file_sync,
+            file_data,
+            object_name,
+            content_type,
+            bucket_name,
+            public_assets,
+        )
+
+    def _parse_storage_url(self, url: str) -> tuple[str, str]:
+        parsed = urlparse(url)
+        if parsed.scheme == "s3":
+            return parsed.netloc, parsed.path.lstrip("/")
+        path = parsed.path.lstrip("/")
+        bucket, separator, object_name = path.partition("/")
+        if not separator or not bucket or not object_name:
+            raise BadRequestException("Invalid media URL.")
+        return bucket, object_name
+
+    def normalize_owned_post_media_url(
+        self, user_id: uuid.UUID, url: str, media_type: str
+    ) -> str:
+        bucket, object_name = self._parse_storage_url(url)
+        if bucket not in {
+            settings.MINIO_BUCKET_NAME,
+            settings.MINIO_PRIVATE_BUCKET_NAME,
+        }:
+            raise BadRequestException("Post media must come from the media upload endpoint.")
+        expected_prefix = f"posts/{user_id}/"
+        expected_segment = "/images/" if media_type == "image" else "/videos/"
+        if not object_name.startswith(expected_prefix) or expected_segment not in f"/{object_name}":
+            raise BadRequestException("Post media does not belong to the current user.")
+        return f"s3://{bucket}/{object_name}"
+
+    def get_post_media_url(self, url: Optional[str]) -> Optional[str]:
+        if not url:
+            return None
+        bucket, object_name = self._parse_storage_url(url)
+        try:
+            return self.client.presigned_get_object(
+                bucket, object_name, expires=timedelta(minutes=15)
+            )
+        except Exception as exc:
+            logger.error("Failed to sign media URL: %s", exc)
+            raise ServiceUnavailableException("Media storage is temporarily unavailable.") from exc
 
     async def upload_avatar(
         self,
@@ -182,7 +256,7 @@ class StorageService:
 
         # Upload new WebP avatar
         object_name = f"avatars/{user_id}/{uuid.uuid4()}.webp"
-        public_url = self.upload_file(
+        public_url = await self.upload_file(
             file_data=webp_bytes,
             object_name=object_name,
             content_type="image/webp",
@@ -213,13 +287,15 @@ class StorageService:
                 width, height = img.width, img.height
 
             object_name = f"posts/{user_id}/images/{uuid.uuid4()}.webp"
-            public_url = self.upload_file(
+            canonical_url = await self.upload_file(
                 file_data=webp_bytes,
                 object_name=object_name,
                 content_type="image/webp",
+                bucket_name=settings.MINIO_PRIVATE_BUCKET_NAME,
+                public_assets=False,
             )
             return {
-                "url": public_url,
+                "url": self.get_post_media_url(canonical_url),
                 "media_type": "image",
                 "thumbnail_url": None,
                 "width": width,
@@ -235,15 +311,31 @@ class StorageService:
             if len(raw_bytes) == 0:
                 raise BadRequestException("Video file cannot be empty.")
 
+            is_iso_media = (
+                content_type in {"video/mp4", "video/quicktime"}
+                and len(raw_bytes) >= 12
+                and raw_bytes[4:8] == b"ftyp"
+            )
+            is_webm = (
+                content_type == "video/webm"
+                and raw_bytes.startswith(b"\x1a\x45\xdf\xa3")
+            )
+            if not (is_iso_media or is_webm):
+                raise BadRequestException(
+                    "The uploaded file contents do not match the declared video format."
+                )
+
             ext = ALLOWED_POST_VIDEO_TYPES[content_type]
             object_name = f"posts/{user_id}/videos/{uuid.uuid4()}{ext}"
-            public_url = self.upload_file(
+            canonical_url = await self.upload_file(
                 file_data=raw_bytes,
                 object_name=object_name,
                 content_type=content_type,
+                bucket_name=settings.MINIO_PRIVATE_BUCKET_NAME,
+                public_assets=False,
             )
             return {
-                "url": public_url,
+                "url": self.get_post_media_url(canonical_url),
                 "media_type": "video",
                 "thumbnail_url": None,
                 "width": None,
@@ -272,15 +364,12 @@ class StorageService:
         if not url:
             return
         try:
-            parsed = urlparse(url)
-            path = parsed.path.lstrip("/")
-            bucket_name = settings.MINIO_BUCKET_NAME
-            if path.startswith(bucket_name + "/"):
-                object_name = path[len(bucket_name) + 1 :]
+            bucket_name, object_name = self._parse_storage_url(url)
+            if bucket_name in {
+                settings.MINIO_BUCKET_NAME,
+                settings.MINIO_PRIVATE_BUCKET_NAME,
+            }:
                 await self.delete_file(object_name, bucket_name)
-            elif "avatars/" in path or "posts/" in path or "communities/" in path:
-                # Direct relative path
-                await self.delete_file(path, bucket_name)
         except Exception as exc:
             logger.warning("Error parsing URL '%s' for deletion: %s", url, exc)
 

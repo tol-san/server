@@ -152,22 +152,39 @@ async def test_forgot_and_reset_password_workflow(async_client: AsyncClient, reg
 
     assert otp_code is not None
 
-    # 2. Reset password
+    # 2. Verify the email-bound OTP and receive a one-time reset token
+    verify_resp = await async_client.post(
+        "/api/v1/auth/verify-otp",
+        json={"email": registered_user["email"], "otp": otp_code},
+    )
+    assert verify_resp.status_code == 200
+    assert "access_token" not in verify_resp.json()
+    assert "refresh_token" not in verify_resp.json()
+    reset_token = verify_resp.json()["reset_token"]
+
+    # 3. Reset password using only the reset-specific token
     new_pwd = "BrandNewPassword456!"
     reset_resp = await async_client.post(
         "/api/v1/auth/reset-password",
-        json={"token": otp_code, "new_password": new_pwd},
+        json={"token": reset_token, "new_password": new_pwd},
     )
     assert reset_resp.status_code == 200
 
-    # 3. Old password fails
+    # The reset grant is one-time.
+    replay_resp = await async_client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": reset_token, "new_password": "AnotherPassword789!"},
+    )
+    assert replay_resp.status_code == 401
+
+    # 4. Old password fails
     old_login = await async_client.post(
         "/api/v1/auth/login",
         json={"identifier": registered_user["email"], "password": registered_user["password"]},
     )
     assert old_login.status_code == 401
 
-    # 4. New password succeeds
+    # 5. New password succeeds
     new_login = await async_client.post(
         "/api/v1/auth/login",
         json={"identifier": registered_user["email"], "password": new_pwd},
@@ -206,6 +223,9 @@ async def test_change_password_authenticated(async_client: AsyncClient, register
     )
     assert change_resp.status_code == 200
     assert change_resp.json()["message"] == "Password changed successfully."
+
+    revoked_session = await async_client.get("/api/v1/profiles/me", headers=headers)
+    assert revoked_session.status_code == 401
 
     # 3. Login with new password
     new_login = await async_client.post(

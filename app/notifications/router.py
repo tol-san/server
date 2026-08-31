@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_active_user
 from app.core.database import get_db
-from app.core.security import decode_token
+from app.core.config import settings
+from app.core.redis import get_redis_client
+from app.core.exceptions import BadRequestException, ForbiddenException
+from app.communities.repository import community_repository
+from app.chats.schemas import WsTicketResponse
 from app.notifications.schemas import (
     NotificationResponse,
     PaginatedNotificationsResponse,
@@ -24,6 +28,21 @@ from app.users.models import User
 from app.users.repository import user_repository
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
+
+
+@router.post("/ws-ticket", response_model=WsTicketResponse)
+async def issue_notification_ws_ticket(
+    current_user: User = Depends(get_current_active_user),
+):
+    ticket = str(uuid.uuid4())
+    await get_redis_client().set(
+        f"ws:notification-ticket:{ticket}",
+        json.dumps({"user_id": str(current_user.id)}),
+        ex=settings.WS_TICKET_TTL_SECONDS,
+    )
+    return WsTicketResponse(
+        ticket=ticket, expires_in_seconds=settings.WS_TICKET_TTL_SECONDS
+    )
 
 
 @router.get(
@@ -136,9 +155,19 @@ async def notification_sse_stream(
 )
 async def publish_typing(
     payload: TypingIndicatorPayload,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     service: NotificationService = Depends(lambda: notification_service),
 ):
+    try:
+        community_id = uuid.UUID(payload.channel)
+    except ValueError as exc:
+        raise BadRequestException("Typing channel must be a community ID.") from exc
+    membership = await community_repository.get_membership(
+        db, community_id, current_user.id
+    )
+    if not membership:
+        raise ForbiddenException("You are not a member of this community.")
     await service.publish_typing_signal(
         user=current_user,
         channel=payload.channel,
@@ -151,23 +180,21 @@ async def publish_typing(
 @router.websocket("/ws")
 async def notification_websocket(
     websocket: WebSocket,
-    token: Optional[str] = Query(None),
+    ticket: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Real-time WebSocket endpoint for live notification updates and client signals."""
-    await websocket.accept()
-
-    # Authenticate token
-    if not token:
+    if not ticket:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     try:
-        payload = decode_token(token)
-        user_id_str = payload.get("sub")
-        if not user_id_str or payload.get("type") != "access":
+        raw = await get_redis_client().getdel(f"ws:notification-ticket:{ticket}")
+        if not raw:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
+        ticket_payload = json.loads(raw)
+        user_id_str = ticket_payload.get("user_id")
         user_id = uuid.UUID(user_id_str)
         user = await user_repository.get_by_id(db, user_id)
         if not user or not user.is_active:
@@ -176,6 +203,8 @@ async def notification_websocket(
     except Exception:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+
+    await websocket.accept()
 
     # Register user in-memory queue
     q = asyncio.Queue()

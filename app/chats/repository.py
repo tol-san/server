@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from sqlalchemy import select, and_, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
+
+from app.users.models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chats.models import ChatMessage
@@ -62,8 +66,23 @@ class ChatRepository:
             reply_to_message_id=reply_to_message_id,
             created_at=now,
         )
-        db.add(msg)
-        await db.flush()
+        try:
+            async with db.begin_nested():
+                db.add(msg)
+                await db.flush()
+        except IntegrityError:
+            existing = (
+                await db.execute(
+                    select(ChatMessage)
+                    .where(
+                        ChatMessage.sender_id == sender_id,
+                        ChatMessage.client_message_id == client_message_id,
+                    )
+                    .options(selectinload(ChatMessage.sender).selectinload(User.profile))
+                )
+            ).scalar_one()
+            return existing, False
+
         await db.refresh(msg)
         return msg, True
 

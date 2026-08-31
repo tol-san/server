@@ -180,6 +180,11 @@ async def test_private_community_join_requests_flow(async_client: AsyncClient):
     assert join_resp.json()["status"] == "pending"
     assert join_resp.json()["is_member"] is False
 
+    hidden_detail = await async_client.get(f"/api/v1/communities/{comm_id}")
+    assert hidden_detail.status_code == 404
+    hidden_members = await async_client.get(f"/api/v1/communities/{comm_id}/members")
+    assert hidden_members.status_code == 404
+
     # 2. Owner lists join requests
     requests_resp = await async_client.get(
         f"/api/v1/communities/{comm_id}/join-requests",
@@ -206,10 +211,14 @@ async def test_private_community_join_requests_flow(async_client: AsyncClient):
     assert approve_resp.status_code == 200
 
     # 5. Verify member count and member list
-    detail = await async_client.get(f"/api/v1/communities/{comm_id}")
+    detail = await async_client.get(
+        f"/api/v1/communities/{comm_id}", headers=applicant["headers"]
+    )
     assert detail.json()["member_count"] == 2
 
-    members_resp = await async_client.get(f"/api/v1/communities/{comm_id}/members")
+    members_resp = await async_client.get(
+        f"/api/v1/communities/{comm_id}/members", headers=applicant["headers"]
+    )
     assert members_resp.status_code == 200
     usernames = [m["username"] for m in members_resp.json()["items"]]
     assert "applicant" in usernames

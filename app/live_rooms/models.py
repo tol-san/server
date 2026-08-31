@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -46,6 +46,15 @@ class LiveRoom(Base):
 
 class LiveSession(Base):
     __tablename__ = "live_sessions"
+    __table_args__ = (
+        Index(
+            "uq_live_sessions_one_active_per_room",
+            "room_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL"),
+            sqlite_where=text("ended_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     room_id: Mapped[uuid.UUID] = mapped_column(
@@ -70,6 +79,11 @@ class LiveSession(Base):
 class ProviderEvent(Base):
     """Stores processed provider webhook event IDs for idempotency."""
     __tablename__ = "provider_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "provider_event_id", name="uq_provider_event_identity"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     provider: Mapped[str] = mapped_column(String(30), nullable=False)

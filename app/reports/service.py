@@ -3,6 +3,9 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.communities.repository import community_repository
+from app.communities.access import require_community_view
+from app.comments.repository import comment_repository
+from app.chats.repository import chat_repository
 from app.core.exceptions import (
     BadRequestException,
     ForbiddenException,
@@ -22,6 +25,8 @@ from app.reports.schemas import (
 )
 from app.users.models import User
 from app.users.repository import user_repository
+from app.posts.access import require_post_view
+from app.posts.repository import post_repository
 
 
 def map_report_to_response(r: Report) -> ReportResponse:
@@ -57,6 +62,54 @@ class ReportService:
         self.user_repo = user_repo
         self.comm_repo = comm_repo
 
+    async def _resolve_target(
+        self,
+        db: AsyncSession,
+        report_type: str,
+        target_id: uuid.UUID,
+        viewer: Optional[User] = None,
+    ) -> tuple[Optional[uuid.UUID], Optional[uuid.UUID]]:
+        """Return (derived community ID, responsible user ID) after access checks."""
+        if report_type == "user":
+            user = await self.user_repo.get_by_id(db, target_id)
+            if not user:
+                raise NotFoundException("Reported user not found.")
+            return None, user.id
+
+        if report_type == "community":
+            community = await self.comm_repo.get_by_id(db, target_id)
+            if not community:
+                raise NotFoundException("Reported community not found.")
+            await require_community_view(db, community, viewer)
+            return community.id, community.owner_id
+
+        if report_type == "post":
+            post = await post_repository.get_by_id(db, target_id)
+            if not post:
+                raise NotFoundException("Reported post not found.")
+            if viewer:
+                await require_post_view(db, post, viewer)
+            return post.community_id, post.author_id
+
+        if report_type == "comment":
+            comment = await comment_repository.get_by_id(db, target_id)
+            if not comment:
+                raise NotFoundException("Reported comment not found.")
+            if viewer:
+                await require_post_view(db, comment.post, viewer)
+            return comment.post.community_id, comment.user_id
+
+        message = await chat_repository.get_by_id(db, target_id)
+        if not message:
+            raise NotFoundException("Reported chat message not found.")
+        if viewer and not viewer.is_superuser:
+            membership = await self.comm_repo.get_membership(
+                db, message.community_id, viewer.id
+            )
+            if not membership:
+                raise NotFoundException("Reported chat message not found.")
+        return message.community_id, message.sender_id
+
     async def submit_report(
         self,
         db: AsyncSession,
@@ -75,21 +128,35 @@ class ReportService:
                 f"Invalid reason '{payload.reason}'. Allowed: {', '.join(ALLOWED_REPORT_REASONS)}"
             )
 
-        # Validate community_id if passed
-        if payload.community_id:
-            comm = await self.comm_repo.get_by_id(db, payload.community_id)
-            if not comm:
-                raise NotFoundException("The specified community does not exist.")
-
-        report = await self.repo.create(
+        derived_community_id, target_user_id = await self._resolve_target(
+            db, report_type, payload.target_id, current_user
+        )
+        if payload.community_id and payload.community_id != derived_community_id:
+            raise BadRequestException(
+                "community_id does not match the reported resource."
+            )
+        if target_user_id == current_user.id:
+            raise BadRequestException("You cannot report your own resource.")
+        if await self.repo.get_open_report(
             db,
             reporter_id=current_user.id,
             report_type=report_type,
             target_id=payload.target_id,
-            community_id=payload.community_id,
-            reason=reason,
-            description=payload.description,
-        )
+        ):
+            raise BadRequestException("You already have an open report for this resource.")
+
+        try:
+            report = await self.repo.create(
+                db,
+                reporter_id=current_user.id,
+                report_type=report_type,
+                target_id=payload.target_id,
+                community_id=derived_community_id,
+                reason=reason,
+                description=payload.description,
+            )
+        except ValueError as exc:
+            raise BadRequestException(str(exc)) from exc
 
         loaded = await self.repo.get_by_id(db, report.id)
         return map_report_to_response(loaded or report)
@@ -182,6 +249,21 @@ class ReportService:
                 f"Invalid resolution action '{payload.resolution_action}'. Allowed: {', '.join(ALLOWED_RESOLUTION_ACTIONS)}"
             )
 
+        transitions = {
+            "PENDING": {"REVIEWING", "RESOLVED", "REJECTED"},
+            "REVIEWING": {"RESOLVED", "REJECTED"},
+            "RESOLVED": set(),
+            "REJECTED": set(),
+        }
+        if new_status != report.status and new_status not in transitions[report.status]:
+            raise BadRequestException(
+                f"Cannot transition report from {report.status} to {new_status}."
+            )
+        if new_status not in {"RESOLVED", "REJECTED"} and action != "none":
+            raise BadRequestException(
+                "A resolution action can only be set when closing a report."
+            )
+
         is_admin = current_user.is_superuser
         is_comm_owner = (
             report.community is not None
@@ -199,14 +281,20 @@ class ReportService:
                 "Only platform administrators can suspend user accounts."
             )
 
-        # Apply action if resolved
-        if new_status == "RESOLVED":
-            if action == "user_suspended" and is_admin:
-                target_user = await self.user_repo.get_by_id(db, report.target_id)
-                if target_user:
-                    target_user.is_active = False
-                    db.add(target_user)
-                    await db.commit()
+        if action == "user_suspended":
+            if new_status != "RESOLVED" or not is_admin:
+                raise ForbiddenException(
+                    "Only platform administrators can suspend users while resolving a report."
+                )
+            _, target_user_id = await self._resolve_target(
+                db, report.report_type, report.target_id
+            )
+            target_user = await self.user_repo.get_by_id(db, target_user_id)
+            if not target_user:
+                raise NotFoundException("The responsible user no longer exists.")
+            target_user.is_active = False
+            target_user.token_version += 1
+            db.add(target_user)
 
         updated_report = await self.repo.update_status(
             db,
@@ -216,6 +304,9 @@ class ReportService:
             resolution_notes=payload.resolution_notes,
             reviewed_by=current_user.id,
         )
+
+        await db.commit()
+        await db.refresh(updated_report)
 
         return map_report_to_response(updated_report)
 

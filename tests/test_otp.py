@@ -41,6 +41,16 @@ async def test_verify_wrong_otp_fails():
 
 
 @pytest.mark.asyncio
+async def test_password_reset_otp_cannot_be_verified_without_account_email():
+    email = "bound_reset@example.com"
+    user_id = uuid.uuid4()
+    await store_password_reset_otp(email, user_id, "123456", expire_seconds=60)
+
+    with pytest.raises((AttributeError, TypeError)):
+        await verify_password_reset_otp(None, "123456")
+
+
+@pytest.mark.asyncio
 async def test_verify_otp_endpoint(async_client):
     test_email = "otp_verify_flow@example.com"
     # Register user
@@ -81,17 +91,17 @@ async def test_verify_otp_endpoint(async_client):
     assert otp is not None
     assert len(otp) == 6
 
-    # 2. Verify OTP endpoint -> logs in and returns tokens
+    # 2. Verify OTP endpoint -> returns only a short-lived reset grant
     verify_resp = await async_client.post(
         "/api/v1/auth/verify-otp",
         json={"email": test_email, "otp": otp},
     )
     assert verify_resp.status_code == 200
     data = verify_resp.json()
-    assert "access_token" in data
-    assert "refresh_token" in data
+    assert "access_token" not in data
+    assert "refresh_token" not in data
     assert "reset_token" in data
-    assert data["user"]["email"] == test_email
+    assert data["expires_in"] == 420
 
     # 3. Invalid OTP returns 401
     invalid_resp = await async_client.post(

@@ -43,8 +43,8 @@
 | `POST` | `/api/v1/auth/refresh` | Refresh expired access token with token rotation |
 | `POST` | `/api/v1/auth/logout` | Revoke active refresh token and session |
 | `POST` | `/api/v1/auth/forgot-password` | Request password reset OTP via email (7-min TTL) |
-| `POST` | `/api/v1/auth/verify-otp` | Verify password reset OTP code |
-| `POST` | `/api/v1/auth/reset-password` | Reset password using verified token |
+| `POST` | `/api/v1/auth/verify-otp` | Verify an email-bound reset OTP and return a reset-only one-time grant (no session tokens) |
+| `POST` | `/api/v1/auth/reset-password` | Consume the grant, change the password, and revoke older sessions |
 | `POST` | `/api/v1/auth/change-password` | Change password for authenticated user |
 
 ### Users & Profiles (`/api/v1/users`, `/api/v1/profiles`)
@@ -93,7 +93,7 @@
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/api/v1/posts` | Create text, image carousel, or short video post |
-| `POST` | `/api/v1/posts/media` | Upload post media (Images up to 10MB converted to WebP; Videos up to 50MB) |
+| `POST` | `/api/v1/posts/media` | Upload owner-bound media to the private bucket and return a short-lived signed URL |
 | `GET` | `/api/v1/posts` | List and filter posts by author, community, post type, visibility, search |
 | `GET` | `/api/v1/posts/{post_id}` | Get single post details with media and author info |
 | `PATCH` | `/api/v1/posts/{post_id}` | Update post content or visibility (Author only) |
@@ -144,6 +144,7 @@
 | `DELETE` | `/api/v1/notifications/{notification_id}` | Delete notification from user history |
 | `GET` | `/api/v1/notifications/stream` | Server-Sent Events (SSE) stream powered by Redis Streams |
 | `WS` | `/api/v1/notifications/ws` | Real-time WebSocket connection for live notifications |
+| `POST` | `/api/v1/notifications/ws-ticket` | Issue a short-lived, single-use notification WebSocket ticket |
 | `POST` | `/api/v1/notifications/typing` | Broadcast typing status via Redis Pub/Sub |
 | `POST` | `/api/v1/reports` | Submit report against user, post, comment, community, or chat |
 | `GET` | `/api/v1/reports` | List reports with status, type, and community filters (Admin/Owner) |
@@ -153,7 +154,7 @@
 ### Real-Time Chat & Live Rooms (`/api/v1/chats`, `/api/v1/live-rooms`)
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/v1/chats/ws-ticket` | Issue short-lived, single-use ticket for WebSocket authentication |
+| `POST` | `/api/v1/chats/ws-ticket` | Issue short-lived, single-use ticket for WebSocket authentication |
 | `WS` | `/api/v1/chats/ws/{community_id}` | WebSocket connection for community group chat |
 | `GET` | `/api/v1/chats/{community_id}/messages` | Fetch paginated chat message history |
 | `GET` | `/api/v1/chats/{community_id}/presence` | Fetch online active participants in community chat |

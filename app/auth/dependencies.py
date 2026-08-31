@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +41,9 @@ async def get_current_user(
     if not user:
         raise UnauthorizedException("User not found.")
 
+    if payload.get("ver") != user.token_version:
+        raise UnauthorizedException("Session has been revoked.")
+
     if not user.is_active:
         raise ForbiddenException("User account is inactive.")
 
@@ -75,17 +79,19 @@ async def get_optional_current_user(
     """Return authenticated user if a valid token is provided, or None for anonymous callers."""
     if not token:
         return None
+    payload = decode_token(token)
+    if payload.get("type") != "access":
+        raise UnauthorizedException("Invalid token type. Expected access token.")
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        raise UnauthorizedException("Invalid token payload.")
     try:
-        payload = decode_token(token)
-        if payload.get("type") != "access":
-            return None
-        user_id_str = payload.get("sub")
-        if not user_id_str:
-            return None
         user_id = uuid.UUID(user_id_str)
-        user = await user_repository.get_by_id(db, user_id)
-        if not user or not user.is_active:
-            return None
-        return user
-    except Exception:
-        return None
+    except (ValueError, TypeError):
+        raise UnauthorizedException("Invalid user identifier in token.")
+    user = await user_repository.get_by_id(db, user_id)
+    if not user or payload.get("ver") != user.token_version:
+        raise UnauthorizedException("Session has been revoked.")
+    if not user.is_active:
+        raise ForbiddenException("User account is inactive.")
+    return user

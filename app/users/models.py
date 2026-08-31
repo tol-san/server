@@ -42,6 +42,12 @@ class User(Base, TimestampMixin):
         default=False,
         nullable=False,
     )
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
 
     # One-to-one relationship with Profile
     profile: Mapped[Optional["Profile"]] = relationship(

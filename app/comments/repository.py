@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, Sequence, Tuple
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -46,17 +46,19 @@ class CommentRepository:
         db.add(comment)
 
         # Increment Post comment_count
-        post = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
-        if post:
-            post.comment_count += 1
-            db.add(post)
+        await db.execute(
+            update(Post)
+            .where(Post.id == post_id)
+            .values(comment_count=Post.comment_count + 1)
+        )
 
         # Increment parent comment reply_count if this is a reply
         if parent_id:
-            parent = (await db.execute(select(Comment).where(Comment.id == parent_id))).scalar_one_or_none()
-            if parent:
-                parent.reply_count += 1
-                db.add(parent)
+            await db.execute(
+                update(Comment)
+                .where(Comment.id == parent_id)
+                .values(reply_count=Comment.reply_count + 1)
+            )
 
         await db.commit()
         return await self.get_by_id(db, comment.id)
@@ -77,25 +79,44 @@ class CommentRepository:
         post_id = comment.post_id
         parent_id = comment.parent_id
 
-        # Calculate number of child replies to accurately decrement post counter
-        reply_count_stmt = select(func.count(Comment.id)).where(Comment.parent_id == comment.id)
-        child_replies = (await db.execute(reply_count_stmt)).scalar() or 0
-        total_deleted = 1 + child_replies
+        descendants = select(Comment.id).where(Comment.id == comment.id).cte(
+            name="comment_descendants", recursive=True
+        )
+        descendants = descendants.union_all(
+            select(Comment.id).join(
+                descendants, Comment.parent_id == descendants.c.id
+            )
+        )
+        total_deleted = (
+            await db.execute(select(func.count()).select_from(descendants))
+        ).scalar_one()
 
         await db.delete(comment)
 
         # Decrement Post comment_count
-        post = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
-        if post:
-            post.comment_count = max(0, post.comment_count - total_deleted)
-            db.add(post)
+        await db.execute(
+            update(Post)
+            .where(Post.id == post_id)
+            .values(
+                comment_count=case(
+                    (Post.comment_count >= total_deleted, Post.comment_count - total_deleted),
+                    else_=0,
+                )
+            )
+        )
 
         # Decrement parent reply_count if this was a child reply
         if parent_id:
-            parent = (await db.execute(select(Comment).where(Comment.id == parent_id))).scalar_one_or_none()
-            if parent:
-                parent.reply_count = max(0, parent.reply_count - 1)
-                db.add(parent)
+            await db.execute(
+                update(Comment)
+                .where(Comment.id == parent_id)
+                .values(
+                    reply_count=case(
+                        (Comment.reply_count > 0, Comment.reply_count - 1),
+                        else_=0,
+                    )
+                )
+            )
 
         await db.commit()
 

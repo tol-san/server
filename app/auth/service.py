@@ -26,7 +26,9 @@ from app.core.exceptions import (
     UsernameAlreadyExistsException,
 )
 from app.core.otp import (
+    consume_password_reset_grant,
     generate_otp,
+    store_password_reset_grant,
     store_password_reset_otp,
     store_signup_otp,
     verify_password_reset_otp,
@@ -182,8 +184,8 @@ class AuthService:
 
         await self._index_user_to_search(user)
 
-        access_token = create_access_token(user.id)
-        refresh_token, _ = create_refresh_token(user.id)
+        access_token = create_access_token(user.id, user.token_version)
+        refresh_token, _ = create_refresh_token(user.id, user.token_version)
 
         return TokenResponse(
             access_token=access_token,
@@ -250,8 +252,8 @@ class AuthService:
         if not user.is_active:
             raise ForbiddenException("User account is deactivated.")
 
-        access_token = create_access_token(user.id)
-        refresh_token, _ = create_refresh_token(user.id)
+        access_token = create_access_token(user.id, user.token_version)
+        refresh_token, _ = create_refresh_token(user.id, user.token_version)
 
         return TokenResponse(
             access_token=access_token,
@@ -287,6 +289,8 @@ class AuthService:
         user = await self.user_repo.get_by_id(db, user_id)
         if not user or not user.is_active:
             raise UnauthorizedException("User not found or inactive.")
+        if payload.get("ver") != user.token_version:
+            raise UnauthorizedException("Refresh token has been revoked or is invalid.")
 
         # Invalidate old refresh token (Token Rotation)
         exp = payload.get("exp", 0)
@@ -294,8 +298,8 @@ class AuthService:
         await blacklist_token(jti, remaining_ttl)
 
         # Issue new token pair
-        new_access_token = create_access_token(user.id)
-        new_refresh_token, _ = create_refresh_token(user.id)
+        new_access_token = create_access_token(user.id, user.token_version)
+        new_refresh_token, _ = create_refresh_token(user.id, user.token_version)
 
         return TokenRefreshResponse(
             access_token=new_access_token,
@@ -352,18 +356,17 @@ class AuthService:
         if not user or not user.is_active:
             raise UnauthorizedException("User account is inactive or not found.")
 
-        # Authenticate session
-        access_token = create_access_token(user.id)
-        refresh_token, _ = create_refresh_token(user.id)
-        reset_token = create_password_reset_token(user.id, user.email)
+        reset_token, reset_jti = create_password_reset_token(user.id, user.email)
+        await store_password_reset_grant(
+            reset_jti,
+            user.id,
+            user.email,
+            settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES * 60,
+        )
 
         return VerifyOtpResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_type="bearer",
-            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             reset_token=reset_token,
-            user=UserResponse.model_validate(user),
+            expires_in=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES * 60,
         )
 
     async def reset_password(
@@ -371,30 +374,22 @@ class AuthService:
         db: AsyncSession,
         payload: ResetPasswordRequest,
     ) -> None:
-        user_id: Optional[uuid.UUID] = None
         raw_token = payload.token.strip() if payload.token else ""
+        token_payload = decode_token(raw_token)
+        if token_payload.get("type") != "password_reset":
+            raise UnauthorizedException("Invalid token type. Expected password reset token.")
+        try:
+            user_id = uuid.UUID(token_payload["sub"])
+            token_email = str(token_payload["email"])
+            jti = str(token_payload["jti"])
+        except (KeyError, TypeError, ValueError):
+            raise UnauthorizedException("Invalid password reset token.")
 
-        # 1. Try OTP verification (works with or without email)
-        if len(raw_token) == 6 and raw_token.isdigit():
-            user_id = await verify_password_reset_otp(str(payload.email) if payload.email else None, raw_token)
-
-        # 2. If not found, try JWT token verification (supports password_reset & access tokens)
-        if not user_id and raw_token:
-            try:
-                token_payload = decode_token(raw_token)
-                if token_payload.get("type") in ("password_reset", "access"):
-                    user_id_str = token_payload.get("sub")
-                    if user_id_str:
-                        user_id = uuid.UUID(user_id_str)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning("Silent exception: %s", exc)
-
-        if not user_id:
-            raise UnauthorizedException("Invalid or expired verification code or token.")
+        if not await consume_password_reset_grant(jti, user_id, token_email):
+            raise UnauthorizedException("Password reset token is invalid, expired, or already used.")
 
         user = await self.user_repo.get_by_id(db, user_id)
-        if not user:
+        if not user or user.email.lower() != token_email.lower():
             raise UnauthorizedException("User not found.")
 
         hashed_password = get_password_hash(payload.new_password)

@@ -51,6 +51,7 @@ async def list_communities(
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Offset items"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     service: CommunityService = Depends(lambda: community_service),
 ) -> PaginatedCommunitiesResponse:
     return await service.list_communities(
@@ -60,6 +61,7 @@ async def list_communities(
         is_private=is_private,
         limit=limit,
         offset=offset,
+        current_user=current_user,
     )
 
 
@@ -205,9 +207,10 @@ async def list_community_members(
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Offset items"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     service: CommunityService = Depends(lambda: community_service),
 ) -> PaginatedMembersResponse:
-    return await service.list_members(db, community_id, limit, offset)
+    return await service.list_members(db, community_id, current_user, limit, offset)
 
 
 @router.delete(

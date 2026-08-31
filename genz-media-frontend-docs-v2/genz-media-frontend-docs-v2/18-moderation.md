@@ -13,11 +13,12 @@ RESOLVED / REJECTED
 ## Resolution actions
 
 - `none`
-- `content_deleted`
-- `user_warned`
 - `user_suspended`
-- `community_closed`
 - `dismissed`
+
+The backend rejects any other action. Open duplicate reports by the same
+reporter for the same target are prevented, and terminal reports cannot be
+reopened.
 
 ## Roles
 

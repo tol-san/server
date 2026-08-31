@@ -5,6 +5,7 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.communities.models import Community
+from app.communities.access import require_community_view
 from app.communities.repository import CommunityRepository, community_repository
 from app.communities.schemas import (
     CommunityCreateRequest,
@@ -29,6 +30,31 @@ def slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     return re.sub(r"[-\s]+", "-", text).strip("-")
+
+
+async def sync_community_search_index(community: Community) -> None:
+    """Keep private community metadata out of the external search index."""
+    from app.core.meilisearch import meilisearch_service
+
+    if community.is_private:
+        await meilisearch_service.delete_community(community.id)
+        return
+    await meilisearch_service.index_community(
+        {
+            "id": str(community.id),
+            "name": community.name,
+            "slug": community.slug,
+            "description": community.description,
+            "avatar_url": community.avatar_url,
+            "cover_image_url": community.cover_image_url,
+            "is_private": community.is_private,
+            "owner_id": str(community.owner_id),
+            "member_count": community.member_count,
+            "post_count": community.post_count,
+            "interest_id": str(community.interest_id) if community.interest_id else None,
+            "created_at": community.created_at.isoformat() if community.created_at else None,
+        }
+    )
 
 
 class CommunityService:
@@ -76,23 +102,7 @@ class CommunityService:
             is_private=payload.is_private,
         )
 
-        from app.core.meilisearch import meilisearch_service
-        await meilisearch_service.index_community(
-            {
-                "id": str(community.id),
-                "name": community.name,
-                "slug": community.slug,
-                "description": community.description,
-                "avatar_url": community.avatar_url,
-                "cover_image_url": community.cover_image_url,
-                "is_private": community.is_private,
-                "owner_id": str(community.owner_id),
-                "member_count": community.member_count,
-                "post_count": community.post_count,
-                "interest_id": str(community.interest_id) if community.interest_id else None,
-                "created_at": community.created_at.isoformat() if community.created_at else None,
-            }
-        )
+        await sync_community_search_index(community)
 
         return CommunityResponse.model_validate(community)
 
@@ -105,6 +115,8 @@ class CommunityService:
         community = await self.community_repo.get_by_id(db, community_id)
         if not community:
             raise NotFoundException("Community not found.")
+
+        await require_community_view(db, community, current_user)
 
         is_member = False
         is_owner = False
@@ -151,23 +163,18 @@ class CommunityService:
         updates = payload.model_dump(exclude_unset=True)
         updated_community = await self.community_repo.update(db, community, **updates)
 
-        from app.core.meilisearch import meilisearch_service
-        await meilisearch_service.index_community(
-            {
-                "id": str(updated_community.id),
-                "name": updated_community.name,
-                "slug": updated_community.slug,
-                "description": updated_community.description,
-                "avatar_url": updated_community.avatar_url,
-                "cover_image_url": updated_community.cover_image_url,
-                "is_private": updated_community.is_private,
-                "owner_id": str(updated_community.owner_id),
-                "member_count": updated_community.member_count,
-                "post_count": updated_community.post_count,
-                "interest_id": str(updated_community.interest_id) if updated_community.interest_id else None,
-                "created_at": updated_community.created_at.isoformat() if updated_community.created_at else None,
-            }
-        )
+        await sync_community_search_index(updated_community)
+        if updated_community.is_private:
+            from sqlalchemy import select
+            from app.core.meilisearch import INDEX_POSTS, meilisearch_service
+            from app.posts.models import Post
+
+            post_ids = (
+                await db.execute(
+                    select(Post.id).where(Post.community_id == updated_community.id)
+                )
+            ).scalars().all()
+            await meilisearch_service.delete_documents(INDEX_POSTS, list(post_ids))
 
         return CommunityResponse.model_validate(updated_community)
 
@@ -205,12 +212,15 @@ class CommunityService:
         is_private: Optional[bool] = None,
         limit: int = 20,
         offset: int = 0,
+        current_user: Optional[User] = None,
     ) -> PaginatedCommunitiesResponse:
         communities, total = await self.community_repo.list_communities(
             db,
             search=search,
             interest_id=interest_id,
             is_private=is_private,
+            viewer_id=current_user.id if current_user else None,
+            viewer_is_superuser=bool(current_user and current_user.is_superuser),
             limit=limit,
             offset=offset,
         )
@@ -259,7 +269,7 @@ class CommunityService:
             await storage_service.delete_file_by_url(community.cover_image_url)
 
         object_name = f"communities/{community_id}/cover_{uuid.uuid4()}.webp"
-        cover_url = storage_service.upload_file(
+        cover_url = await storage_service.upload_file(
             file_data=webp_bytes,
             object_name=object_name,
             content_type="image/webp",
@@ -296,7 +306,7 @@ class CommunityService:
             await storage_service.delete_file_by_url(community.avatar_url)
 
         object_name = f"communities/{community_id}/avatar_{uuid.uuid4()}.webp"
-        avatar_url = storage_service.upload_file(
+        avatar_url = await storage_service.upload_file(
             file_data=webp_bytes,
             object_name=object_name,
             content_type="image/webp",
@@ -372,12 +382,15 @@ class CommunityService:
         self,
         db: AsyncSession,
         community_id: uuid.UUID,
+        current_user: Optional[User] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> PaginatedMembersResponse:
         community = await self.community_repo.get_by_id(db, community_id)
         if not community:
             raise NotFoundException("Community not found.")
+
+        await require_community_view(db, community, current_user)
 
         memberships, total = await self.community_repo.get_members(db, community_id, limit, offset)
         items = [

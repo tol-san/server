@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Sequence, Tuple
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -32,10 +33,31 @@ class ReportRepository:
             description=description,
             status="PENDING",
         )
-        db.add(report)
-        await db.commit()
-        await db.refresh(report)
-        return report
+        try:
+            async with db.begin_nested():
+                db.add(report)
+                await db.flush()
+            await db.commit()
+            await db.refresh(report)
+            return report
+        except IntegrityError:
+            raise ValueError("An open report for this target already exists.")
+
+    async def get_open_report(
+        self,
+        db: AsyncSession,
+        *,
+        reporter_id: uuid.UUID,
+        report_type: str,
+        target_id: uuid.UUID,
+    ) -> Optional[Report]:
+        stmt = select(Report).where(
+            Report.reporter_id == reporter_id,
+            Report.report_type == report_type,
+            Report.target_id == target_id,
+            Report.status.in_(("PENDING", "REVIEWING")),
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
 
     async def get_by_id(
         self, db: AsyncSession, report_id: uuid.UUID
@@ -105,8 +127,7 @@ class ReportRepository:
         report.reviewed_at = datetime.now(timezone.utc)
 
         db.add(report)
-        await db.commit()
-        await db.refresh(report)
+        await db.flush()
         return report
 
 

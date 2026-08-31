@@ -175,6 +175,10 @@ async def test_webhook_idempotency_returns_true_on_new_event():
     mock_result.scalar_one_or_none.return_value = None  # not seen before
     mock_db.execute = AsyncMock(return_value=mock_result)
     mock_db.flush = AsyncMock()
+    savepoint = MagicMock()
+    savepoint.__aenter__ = AsyncMock(return_value=None)
+    savepoint.__aexit__ = AsyncMock(return_value=False)
+    mock_db.begin_nested = MagicMock(return_value=savepoint)
 
     is_new = await repo.try_store_provider_event(
         mock_db,
@@ -249,7 +253,10 @@ async def test_metrics_live_room_reads_from_redis():
     service.tracker = mock_tracker
 
     mock_db = AsyncMock()
-    metrics = await service.get_metrics(mock_db, room_id)
+    mock_room.community_id = uuid.uuid4()
+    current_user = MagicMock()
+    current_user.is_superuser = True
+    metrics = await service.get_metrics(mock_db, room_id, current_user)
 
     assert metrics.current_viewers == 42
     assert metrics.peak_viewers == 55
@@ -287,7 +294,10 @@ async def test_metrics_ended_room_reads_from_db():
     service.repo = mock_repo
 
     mock_db = AsyncMock()
-    metrics = await service.get_metrics(mock_db, room_id)
+    mock_room.community_id = uuid.uuid4()
+    current_user = MagicMock()
+    current_user.is_superuser = True
+    metrics = await service.get_metrics(mock_db, room_id, current_user)
 
     assert metrics.current_viewers == 0
     assert metrics.peak_viewers == 30

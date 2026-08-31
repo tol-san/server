@@ -117,6 +117,15 @@ class ChatService:
         if not member:
             raise ForbiddenException("You are not a member of this community.")
 
+        if reply_to_message_id:
+            reply = await self.repo.get_by_id(db, reply_to_message_id)
+            if (
+                not reply
+                or reply.community_id != community_id
+                or reply.deleted_at is not None
+            ):
+                raise BadRequestException("Reply target is not a message in this community.")
+
         # 2. Rate limit
         await self._check_rate_limit(str(sender.id))
 
@@ -147,6 +156,7 @@ class ChatService:
                     },
                 )
 
+        await db.commit()
         resp = _map_message(msg)
 
         # 4. Publish to Redis Pub/Sub for real-time fan-out (after DB commit)

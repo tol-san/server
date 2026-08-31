@@ -116,7 +116,7 @@ async def get_live_metrics(
     - LIVE room: real-time from Redis (current viewers, peak, total joins)
     - ENDED room: historic from PostgreSQL live_sessions record
     """
-    return await service.get_metrics(db, room_id)
+    return await service.get_metrics(db, room_id, current_user)
 
 
 @router.post("/{room_id}/reconcile")

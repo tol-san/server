@@ -112,36 +112,8 @@ class SearchService:
     ) -> PaginatedCommunitySearchResponse:
         current_uid = current_user.id if current_user else None
 
-        # 1. Try Meilisearch
-        if await self.meili.is_healthy():
-            res = await self.meili.search(
-                INDEX_COMMUNITIES,
-                query=query,
-                limit=limit,
-                offset=offset,
-            )
-            hits = res.get("hits", [])
-            total = res.get("total") or 0
-            if hits or total > 0:
-                items = [
-                    CommunitySearchResult(
-                        id=uuid.UUID(h["id"]) if isinstance(h["id"], str) else h["id"],
-                        name=h.get("name", ""),
-                        slug=h.get("slug", ""),
-                        description=h.get("description"),
-                        avatar_url=h.get("avatar_url"),
-                        cover_image_url=h.get("cover_image_url"),
-                        is_private=h.get("is_private", False),
-                        member_count=h.get("member_count", 0),
-                        post_count=h.get("post_count", 0),
-                    )
-                    for h in hits
-                ]
-                return PaginatedCommunitySearchResponse(
-                    items=items, total=total, limit=limit, offset=offset
-                )
-
-        # 2. SQL Fallback
+        # Community visibility depends on live membership state, so authorization
+        # must be applied by PostgreSQL rather than trusting denormalized index hits.
         communities, total = await self.repo.search_communities(
             db,
             query=query,
@@ -177,45 +149,8 @@ class SearchService:
     ) -> PaginatedPostSearchResponse:
         current_uid = current_user.id if current_user else None
 
-        # 1. Try Meilisearch
-        if await self.meili.is_healthy():
-            res = await self.meili.search(
-                INDEX_POSTS,
-                query=query,
-                limit=limit,
-                offset=offset,
-            )
-            hits = res.get("hits", [])
-            total = res.get("total") or 0
-            if current_uid and hits:
-                blocked_ids = await self.repo.get_blocked_user_ids(db, current_uid)
-                hits = [h for h in hits if str(h.get("author_id")) not in blocked_ids]
-            if hits:
-                items = [
-                    PostSearchResult(
-                        id=uuid.UUID(h["id"]) if isinstance(h["id"], str) else h["id"],
-                        title=h.get("title"),
-                        content=h.get("content"),
-                        post_type=h.get("post_type", "text"),
-                        visibility=h.get("visibility", "public"),
-                        author_id=uuid.UUID(h["author_id"])
-                        if h.get("author_id")
-                        else None,
-                        author_username=h.get("author_username"),
-                        community_id=uuid.UUID(h["community_id"])
-                        if h.get("community_id")
-                        else None,
-                        community_name=h.get("community_name"),
-                        like_count=h.get("like_count", 0),
-                        comment_count=h.get("comment_count", 0),
-                    )
-                    for h in hits
-                ]
-                return PaginatedPostSearchResponse(
-                    items=items, total=len(hits) if current_uid else total, limit=limit, offset=offset
-                )
-
-        # 2. SQL Fallback
+        # Post visibility includes follows, blocks, ownership, and community
+        # membership. Apply the canonical live SQL policy for every result.
         posts, total = await self.repo.search_posts(
             db,
             query=query,
@@ -350,7 +285,27 @@ class SearchService:
 
     async def sync_all_indexes(self, db: AsyncSession) -> SyncIndexResponse:
         """Extract all database records and index them into Meilisearch."""
+        from sqlalchemy import or_, select
+        from app.communities.models import Community
+        from app.posts.models import Post
+
         await self.meili.init_indexes()
+
+        private_community_ids = (
+            await db.execute(select(Community.id).where(Community.is_private.is_(True)))
+        ).scalars().all()
+        nonpublic_post_ids = (
+            await db.execute(
+                select(Post.id).where(
+                    or_(
+                        Post.visibility != "public",
+                        Post.community_id.in_(private_community_ids),
+                    )
+                )
+            )
+        ).scalars().all()
+        await self.meili.delete_documents(INDEX_COMMUNITIES, list(private_community_ids))
+        await self.meili.delete_documents(INDEX_POSTS, list(nonpublic_post_ids))
 
         # 1. Sync Users
         users = await self.repo.fetch_all_users_for_sync(db)

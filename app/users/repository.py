@@ -77,6 +77,7 @@ class UserRepository:
 
     async def update_password(self, db: AsyncSession, user: User, hashed_password: str) -> User:
         user.hashed_password = hashed_password
+        user.token_version += 1
         db.add(user)
         await db.commit()
         await db.refresh(user)

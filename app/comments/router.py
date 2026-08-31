@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_active_user
+from app.auth.dependencies import get_current_active_user, get_optional_current_user
 from app.comments.schemas import (
     CommentCreateRequest,
     CommentResponse,
@@ -46,9 +46,10 @@ async def list_post_comments(
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Offset items"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     service: CommentService = Depends(lambda: comment_service),
 ) -> PaginatedCommentsResponse:
-    return await service.list_post_comments(db, post_id, limit, offset)
+    return await service.list_post_comments(db, post_id, current_user, limit, offset)
 
 
 @router.get(
@@ -61,9 +62,10 @@ async def list_post_comments(
 async def get_comment(
     comment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     service: CommentService = Depends(lambda: comment_service),
 ) -> CommentResponse:
-    return await service.get_comment(db, comment_id)
+    return await service.get_comment(db, comment_id, current_user)
 
 
 @router.get(
@@ -78,9 +80,10 @@ async def list_comment_replies(
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Offset items"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     service: CommentService = Depends(lambda: comment_service),
 ) -> PaginatedCommentsResponse:
-    return await service.list_replies(db, comment_id, limit, offset)
+    return await service.list_replies(db, comment_id, current_user, limit, offset)
 
 
 @router.patch(

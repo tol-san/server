@@ -62,8 +62,8 @@ async def test_create_multi_format_personal_posts(async_client: AsyncClient):
         "content": "Sunset vibes at the beach",
         "visibility": "public",
         "media": [
-            {"media_type": "image", "url": "https://example.com/img1.webp", "width": 1080, "height": 1080, "order": 0},
-            {"media_type": "image", "url": "https://example.com/img2.webp", "width": 1080, "height": 1080, "order": 1},
+            {"media_type": "image", "url": f"http://storage.test/genz-media-private/posts/{user['id']}/images/img1.webp?signature=test", "width": 1080, "height": 1080, "order": 0},
+            {"media_type": "image", "url": f"http://storage.test/genz-media-private/posts/{user['id']}/images/img2.webp?signature=test", "width": 1080, "height": 1080, "order": 1},
         ],
     }
     img_resp = await async_client.post(
@@ -75,7 +75,7 @@ async def test_create_multi_format_personal_posts(async_client: AsyncClient):
     img_data = img_resp.json()
     assert img_data["post_type"] == "image"
     assert len(img_data["media"]) == 2
-    assert img_data["media"][0]["url"] == "https://example.com/img1.webp"
+    assert f"posts/{user['id']}/images/img1.webp" in img_data["media"][0]["url"]
 
     # 3. Short Video Post
     video_payload = {
@@ -85,8 +85,8 @@ async def test_create_multi_format_personal_posts(async_client: AsyncClient):
         "media": [
             {
                 "media_type": "video",
-                "url": "https://example.com/video1.mp4",
-                "thumbnail_url": "https://example.com/thumb1.webp",
+                "url": f"http://storage.test/genz-media-private/posts/{user['id']}/videos/video1.mp4?signature=test",
+                "thumbnail_url": f"http://storage.test/genz-media-private/posts/{user['id']}/images/thumb1.webp?signature=test",
                 "duration": 18.5,
                 "order": 0,
             }
@@ -166,7 +166,7 @@ async def test_media_upload_endpoint(async_client: AsyncClient):
     assert img_upload.status_code == 200
     img_resp_data = img_upload.json()
     assert img_resp_data["media_type"] == "image"
-    assert img_resp_data["url"].endswith(".webp")
+    assert img_resp_data["url"].split("?", 1)[0].endswith(".webp")
     assert img_resp_data["width"] == 600
     assert img_resp_data["height"] == 600
 
@@ -181,7 +181,7 @@ async def test_media_upload_endpoint(async_client: AsyncClient):
     assert vid_upload.status_code == 200
     vid_resp_data = vid_upload.json()
     assert vid_resp_data["media_type"] == "video"
-    assert vid_resp_data["url"].endswith(".mp4")
+    assert vid_resp_data["url"].split("?", 1)[0].endswith(".mp4")
 
 
 @pytest.mark.asyncio
@@ -241,3 +241,65 @@ async def test_post_deletion_permissions(async_client: AsyncClient):
     # Confirm post is gone -> 404
     get_after = await async_client.get(f"/api/v1/posts/{post_id}")
     assert get_after.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_visibility_is_consistent_across_derived_endpoints(
+    async_client: AsyncClient,
+):
+    author = await create_user(async_client, "privacyauthor", "privacyauthor@example.com")
+    viewer = await create_user(async_client, "privacyviewer", "privacyviewer@example.com")
+    unique_text = "visibility-policy-sentinel"
+    created = await async_client.post(
+        "/api/v1/posts",
+        headers=author["headers"],
+        json={
+            "post_type": "text",
+            "content": unique_text,
+            "visibility": "followers_only",
+        },
+    )
+    post_id = created.json()["id"]
+
+    assert (await async_client.get(f"/api/v1/posts/{post_id}")).status_code == 404
+    assert (
+        await async_client.get(f"/api/v1/posts/{post_id}/comments")
+    ).status_code == 404
+    assert (
+        await async_client.post(
+            f"/api/v1/posts/{post_id}/like", headers=viewer["headers"]
+        )
+    ).status_code == 404
+    hidden_search = await async_client.get(
+        f"/api/v1/search/posts?q={unique_text}", headers=viewer["headers"]
+    )
+    assert hidden_search.json()["total"] == 0
+
+    follow = await async_client.post(
+        f"/api/v1/users/{author['id']}/follow", headers=viewer["headers"]
+    )
+    assert follow.status_code == 200
+    visible = await async_client.get(
+        f"/api/v1/posts/{post_id}", headers=viewer["headers"]
+    )
+    assert visible.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_post_rejects_media_owned_by_another_user(async_client: AsyncClient):
+    attacker = await create_user(async_client, "mediaattacker", "mediaattacker@example.com")
+    victim = await create_user(async_client, "mediavictim", "mediavictim@example.com")
+    response = await async_client.post(
+        "/api/v1/posts",
+        headers=attacker["headers"],
+        json={
+            "post_type": "image",
+            "media": [
+                {
+                    "media_type": "image",
+                    "url": f"http://storage.test/genz-media-private/posts/{victim['id']}/images/private.webp?signature=test",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 400

@@ -5,6 +5,7 @@ from app.core.cache import cache_service
 from app.feeds.repository import FeedRepository, feed_repository
 from app.posts.schemas import PaginatedPostsResponse, PostResponse
 from app.posts.service import map_post_to_response
+from app.posts.repository import post_repository
 from app.users.models import User
 
 
@@ -13,6 +14,19 @@ class FeedService:
 
     def __init__(self, repo: FeedRepository = feed_repository):
         self.repo = repo
+
+    async def _map_posts(self, db: AsyncSession, current_user: User, posts):
+        liked, saved = await post_repository.get_viewer_engagement(
+            db, current_user.id, [post.id for post in posts]
+        )
+        return [
+            map_post_to_response(
+                post,
+                is_liked=post.id in liked,
+                is_saved=post.id in saved,
+            )
+            for post in posts
+        ]
 
     async def get_home_feed(
         self,
@@ -29,7 +43,7 @@ class FeedService:
         posts, total = await self.repo.get_home_feed(
             db, user_id=current_user.id, limit=limit, offset=offset
         )
-        items = [map_post_to_response(p) for p in posts]
+        items = await self._map_posts(db, current_user, posts)
         resp = PaginatedPostsResponse(
             items=items, total=total, limit=limit, offset=offset
         )
@@ -52,7 +66,7 @@ class FeedService:
         posts, total = await self.repo.get_discover_feed(
             db, user_id=current_user.id, limit=limit, offset=offset
         )
-        items = [map_post_to_response(p) for p in posts]
+        items = await self._map_posts(db, current_user, posts)
         resp = PaginatedPostsResponse(
             items=items, total=total, limit=limit, offset=offset
         )
@@ -75,7 +89,7 @@ class FeedService:
         posts, total = await self.repo.get_shorts_feed(
             db, user_id=current_user.id, limit=limit, offset=offset
         )
-        items = [map_post_to_response(p) for p in posts]
+        items = await self._map_posts(db, current_user, posts)
         resp = PaginatedPostsResponse(
             items=items, total=total, limit=limit, offset=offset
         )
@@ -94,4 +108,3 @@ class FeedService:
 
 
 feed_service = FeedService()
-

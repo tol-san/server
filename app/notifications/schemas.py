@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class NotificationActor(BaseModel):
@@ -43,5 +43,5 @@ class UnreadCountResponse(BaseModel):
 
 
 class TypingIndicatorPayload(BaseModel):
-    channel: str
+    channel: str = Field(..., min_length=36, max_length=36)
     is_typing: bool = True

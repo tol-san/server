@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import select, and_, update as sa_update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.live_rooms.models import LiveRoom, LiveSession, ProviderEvent
@@ -45,6 +46,14 @@ class LiveRoomRepository:
     ) -> Optional[LiveRoom]:
         result = await db.execute(
             select(LiveRoom).where(LiveRoom.id == room_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id_for_update(
+        self, db: AsyncSession, room_id: uuid.UUID
+    ) -> Optional[LiveRoom]:
+        result = await db.execute(
+            select(LiveRoom).where(LiveRoom.id == room_id).with_for_update()
         )
         return result.scalar_one_or_none()
 
@@ -189,8 +198,9 @@ class LiveRoomRepository:
                 )
             )
         )
-        if result.scalar_one_or_none():
-            return False  # duplicate, skip
+        existing = result.scalar_one_or_none()
+        if existing:
+            return existing.processed_at is None
 
         now = datetime.now(timezone.utc)
         event = ProviderEvent(
@@ -198,11 +208,30 @@ class LiveRoomRepository:
             provider_event_id=provider_event_id,
             event_type=event_type,
             received_at=now,
-            processed_at=now,
+            processed_at=None,
         )
-        db.add(event)
-        await db.flush()
-        return True
+        try:
+            async with db.begin_nested():
+                db.add(event)
+                await db.flush()
+            return True
+        except IntegrityError:
+            return False
+
+    async def mark_provider_event_processed(
+        self, db: AsyncSession, *, provider: str, provider_event_id: str
+    ) -> None:
+        event = (
+            await db.execute(
+                select(ProviderEvent).where(
+                    ProviderEvent.provider == provider,
+                    ProviderEvent.provider_event_id == provider_event_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if event:
+            event.processed_at = datetime.now(timezone.utc)
+            await db.flush()
 
 
 live_room_repository = LiveRoomRepository()

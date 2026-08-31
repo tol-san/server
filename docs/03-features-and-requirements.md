@@ -7,8 +7,8 @@ The authentication system supports:
 - **Two-Step Email Registration**: Client requests 6-digit OTP (`/auth/register/request-otp`) which validates domain DNS MX records and mailbox deliverability via SMTP handshake before generating a 7-minute OTP. User verifies code (`/auth/register/verify-otp`) to obtain authenticated session with an auto-generated unique username.
 - **Username Availability Verification**: Real-time validation endpoint (`/users/check-username`) ensuring unique username selection before updating profiles.
 - **Login & Token Lifecycle**: Login (`/auth/login`), Token Refresh (`/auth/refresh`), and Logout (`/auth/logout`) using JWT access tokens and secure refresh tokens.
-- **Password Reset**: Email-delivered 6-digit reset OTP (7-minute TTL) with verified token reset (`/auth/forgot-password`, `/auth/verify-otp`, `/auth/reset-password`).
-- **Change Password**: Authenticated password updates (`/auth/change-password`).
+- **Password Reset**: Email-bound 6-digit OTP (7-minute TTL). Verification issues only a one-time `password_reset` grant and never creates an authenticated session. A completed reset revokes all older access and refresh tokens.
+- **Change Password**: Authenticated password updates (`/auth/change-password`) revoke all previously issued tokens through the user's token version.
 
 ---
 
@@ -108,7 +108,7 @@ Blazing fast, typo-tolerant full-text search powered by **Meilisearch** with aut
 - **Communities**: Search by name, slug, and description (filtered by accessibility).
 - **Posts**: Search by title and content (filtered by visibility and blocking rules).
 - **Interests**: Search master taxonomy by category name, slug, and description.
-- **Index Synchronization**: Automated background document indexing on creation, update, and deletion hooks, with admin-triggered full database resync (`POST /api/v1/search/sync`).
+- **Index Synchronization**: Only public communities and globally public posts are indexed. Membership-, follow-, block-, and ownership-sensitive searches use live PostgreSQL authorization; private transitions remove stale index documents.
 - **Resilience**: Automatic fallback to PostgreSQL queries if the search engine is unavailable.
 
 ---
@@ -127,7 +127,7 @@ Real-time messaging via **FastAPI WebSockets**:
 
 ### 3.1.11 Community Group Chat ✅ Implemented (Level 3 — Advanced Reliability)
 Real-time WebSocket community chat with production-grade reliability:
-- **WebSocket Gateway** (`/api/v1/chats/ws/{community_id}`) — ticket-based auth (one-time JWT-issued ticket)
+- **WebSocket Gateway** (`/api/v1/chats/ws/{community_id}`) — Redis-backed one-time ticket auth, membership recheck on connect, and enforced heartbeat timeout
 - **Membership Enforcement** — membership verified on connect; kick/ban instantly closes socket (Redis Pub/Sub control channel)
 - **Idempotent Messages** — `client_message_id` prevents duplicates on mobile retry
 - **Cursor/Keyset Pagination** — history via `GET /chats/{community_id}/messages?before=<cursor>`
@@ -159,8 +159,8 @@ Event-driven in-app notifications system powered by PostgreSQL persistence, **Re
 - **Delivery Channels**:
   - **REST API (`/api/v1/notifications`)**: Paginated list, unread count badge query, mark individual/all as read, delete notification.
   - **Server-Sent Events (SSE) (`/api/v1/notifications/stream`)**: Real-time push streaming from Redis Streams.
-  - **WebSocket (`/api/v1/notifications/ws`)**: Interactive bidirectional socket for instant notifications.
-  - **Ephemeral Signals (Redis Pub/Sub)**: Fire-and-forget real-time signals such as typing indicators (`"User A is typing..."` at `/api/v1/notifications/typing`).
+  - **WebSocket (`/api/v1/notifications/ws`)**: Uses a one-time ticket from `POST /api/v1/notifications/ws-ticket`; bearer JWTs are not placed in WebSocket URLs.
+  - **Ephemeral Signals (Redis Pub/Sub)**: Typing channels are UUID community IDs and require active membership.
 
 ---
 
@@ -170,8 +170,8 @@ Multi-entity reporting and stateful moderation lifecycle:
 - **Reasons**: `spam`, `harassment`, `inappropriate_content`, `hate_speech`, `violence`, `copyright`, `other`.
 - **Moderation Workflow States**:
   `PENDING` → `REVIEWING` → `RESOLVED` / `REJECTED`
-- **Resolution Actions**:
-  `none`, `content_deleted`, `user_warned`, `user_suspended`, `community_closed`, `dismissed`.
+- **Resolution Actions**: `none`, `user_suspended`, `dismissed`. Unsupported actions are rejected instead of being recorded without an operation.
+- **Integrity**: Targets must exist and be visible to the reporter, community scope is derived server-side, duplicate open reports are prevented, and terminal reports cannot be reopened.
 - **Role-Based Access Control (RBAC)**:
   - **System Admin**: Platform-wide moderation, review global reports, suspend/deactivate user accounts, close communities.
   - **Community Owner**: Community-scoped moderation for reports on content within their owned communities.

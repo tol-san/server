@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -15,6 +15,17 @@ class Report(Base):
     """Report entity for user flagging of content, users, communities, and chat messages."""
 
     __tablename__ = "reports"
+    __table_args__ = (
+        Index(
+            "uq_reports_open_reporter_target",
+            "reporter_id",
+            "report_type",
+            "target_id",
+            unique=True,
+            postgresql_where=text("status IN ('PENDING', 'REVIEWING')"),
+            sqlite_where=text("status IN ('PENDING', 'REVIEWING')"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
@@ -57,7 +68,7 @@ class Report(Base):
     resolution_action: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
-    )  # none, content_deleted, user_warned, user_suspended, community_closed, dismissed
+    )  # none, user_suspended, dismissed
     resolution_notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,

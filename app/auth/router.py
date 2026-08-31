@@ -1,7 +1,8 @@
 from typing import Optional
+import hashlib
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, status, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -209,9 +210,17 @@ async def verify_otp(
 )
 async def reset_password(
     payload: ResetPasswordRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> MessageResponse:
+    token_fingerprint = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    client_host = request.client.host if request.client else "unknown"
+    await _rate_limit(
+        f"ratelimit:reset_password:{client_host}:{token_fingerprint}",
+        max_requests=5,
+        window_seconds=300,
+    )
     await service.reset_password(db, payload)
     return MessageResponse(message="Password has been successfully reset. You can now login.")
 

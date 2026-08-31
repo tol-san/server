@@ -1,17 +1,17 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class MediaItemCreate(BaseModel):
-    media_type: str = Field(..., description="Media type: image or video")
+    media_type: Literal["image", "video"] = Field(..., description="Media type")
     url: str = Field(..., max_length=500, description="Media asset URL")
     thumbnail_url: Optional[str] = Field(None, max_length=500, description="Video thumbnail URL")
-    duration: Optional[float] = Field(None, description="Video duration in seconds")
-    width: Optional[int] = Field(None, description="Media pixel width")
-    height: Optional[int] = Field(None, description="Media pixel height")
-    order: int = Field(0, description="Display order index for carousel")
+    duration: Optional[float] = Field(None, ge=0, le=3600, description="Video duration in seconds")
+    width: Optional[int] = Field(None, ge=1, le=16384, description="Media pixel width")
+    height: Optional[int] = Field(None, ge=1, le=16384, description="Media pixel height")
+    order: int = Field(0, ge=0, le=9, description="Display order index for carousel")
 
 
 class MediaItemResponse(BaseModel):
@@ -30,7 +30,7 @@ class MediaItemResponse(BaseModel):
 class PostCreateRequest(BaseModel):
     post_type: str = Field("text", description="Type of post: text, image, video")
     title: Optional[str] = Field(None, max_length=255, description="Title for articles or text posts")
-    content: Optional[str] = Field(None, description="Body content, markdown, or caption")
+    content: Optional[str] = Field(None, max_length=20000, description="Body content, markdown, or caption")
     visibility: str = Field("public", description="Visibility: public, followers_only, private")
     community_id: Optional[uuid.UUID] = Field(None, description="Community UUID if posting to a community")
     media: Optional[List[MediaItemCreate]] = Field(None, description="List of media items for image/video posts")
@@ -70,11 +70,13 @@ class PostResponse(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     visibility: str
-    media: List[MediaItemResponse] = []
+    media: List[MediaItemResponse] = Field(default_factory=list)
     like_count: int = 0
     comment_count: int = 0
     share_count: int = 0
     save_count: int = 0
+    is_liked: bool = False
+    is_saved: bool = False
     created_at: datetime
 
 

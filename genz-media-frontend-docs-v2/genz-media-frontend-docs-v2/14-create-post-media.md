@@ -53,7 +53,9 @@ Only include valid community destinations.
 
 ## Media workflow
 
-The backend architecture stores media in object storage, not PostgreSQL.
+The backend stores media in object storage, not PostgreSQL. Post media is
+private and API responses contain short-lived signed URLs. Only the user who
+uploaded an object may attach its canonical media reference to a post.
 
 Flutter flow:
 
@@ -76,6 +78,9 @@ Published
 ```text
 Upload complete ≠ Post published
 ```
+
+An upload failure is an error and must not be treated as a successful upload or
+replaced with a placeholder URL.
 
 Do not show Published before `POST /api/v1/posts` succeeds.
 

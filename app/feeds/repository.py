@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.communities.models import Community, CommunityMembership
 from app.interests.models import UserInterest
 from app.posts.models import Post
+from app.posts.access import post_access_filters
 from app.users.models import Block, Follow, User
 
 
@@ -53,17 +54,9 @@ class FeedRepository:
             Post.author_id == user_id,
         )
 
-        visibility_condition = or_(
-            Post.visibility == "public",
-            (Post.visibility == "followers_only")
-            & or_(Post.author_id.in_(following_sub), Post.author_id == user_id),
-            (Post.visibility == "private") & (Post.author_id == user_id),
-        )
-
         filters = [
             source_condition,
-            visibility_condition,
-            Post.author_id.not_in(blocked_sub),
+            *post_access_filters(user_id),
         ]
 
         count_stmt = select(func.count(Post.id)).where(*filters)
@@ -109,8 +102,7 @@ class FeedRepository:
 
         filters = [
             Post.visibility == "public",
-            Post.author_id.not_in(blocked_sub),
-            accessible_community,
+            *post_access_filters(user_id),
         ]
 
         count_stmt = select(func.count(Post.id)).where(*filters)
@@ -174,8 +166,7 @@ class FeedRepository:
         filters = [
             Post.post_type == "video",
             Post.visibility == "public",
-            Post.author_id.not_in(blocked_sub),
-            accessible_community,
+            *post_access_filters(user_id),
         ]
 
         count_stmt = select(func.count(Post.id)).where(*filters)

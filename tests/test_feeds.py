@@ -171,7 +171,7 @@ async def test_shorts_feed_filtering(async_client: AsyncClient):
             "media": [
                 {
                     "media_type": "video",
-                    "url": "https://example.com/trickshot.mp4",
+                        "url": f"http://storage.test/genz-media-private/posts/{creator['id']}/videos/trickshot.mp4?signature=test",
                     "duration": 12.0,
                 }
             ],

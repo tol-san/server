@@ -41,7 +41,10 @@ class RecommendationRepository:
         joined_sub = self._get_joined_communities_subquery(user_id)
         user_interests_sub = self._get_user_interests_subquery(user_id)
 
-        filters = [Community.id.not_in(joined_sub)]
+        filters = [
+            Community.id.not_in(joined_sub),
+            Community.is_private.is_(False),
+        ]
 
         count_stmt = select(func.count(Community.id)).where(*filters)
         total = (await db.execute(count_stmt)).scalar() or 0

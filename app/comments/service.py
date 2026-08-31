@@ -14,6 +14,7 @@ from app.comments.schemas import (
 )
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.posts.repository import PostRepository, post_repository
+from app.posts.access import require_post_view
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class CommentService:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         # Validate parent comment if this is a nested reply
         if payload.parent_id:
@@ -111,10 +113,12 @@ class CommentService:
         self,
         db: AsyncSession,
         comment_id: uuid.UUID,
+        current_user: Optional[User] = None,
     ) -> CommentResponse:
         comment = await self.comment_repo.get_by_id(db, comment_id)
         if not comment:
             raise NotFoundException("Comment not found.")
+        await require_post_view(db, comment.post, current_user)
         return map_comment_to_response(comment)
 
     async def update_comment(
@@ -164,12 +168,14 @@ class CommentService:
         self,
         db: AsyncSession,
         post_id: uuid.UUID,
+        current_user: Optional[User] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> PaginatedCommentsResponse:
         post = await self.post_repo.get_by_id(db, post_id)
         if not post:
             raise NotFoundException("Post not found.")
+        await require_post_view(db, post, current_user)
 
         comments, total = await self.comment_repo.list_post_comments(db, post_id, limit, offset)
         items = [map_comment_to_response(c) for c in comments]
@@ -179,12 +185,14 @@ class CommentService:
         self,
         db: AsyncSession,
         parent_id: uuid.UUID,
+        current_user: Optional[User] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> PaginatedCommentsResponse:
         parent = await self.comment_repo.get_by_id(db, parent_id)
         if not parent:
             raise NotFoundException("Parent comment not found.")
+        await require_post_view(db, parent.post, current_user)
 
         replies, total = await self.comment_repo.list_replies(db, parent_id, limit, offset)
         items = [map_comment_to_response(r) for r in replies]

@@ -1,5 +1,5 @@
 from typing import List, Union
-from pydantic import AnyHttpUrl, computed_field
+from pydantic import AnyHttpUrl, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET_NAME: str = "genz-media"
+    MINIO_PRIVATE_BUCKET_NAME: str = "genz-media-private"
     MINIO_SECURE: bool = False
     MINIO_PUBLIC_URL: str = "http://localhost:9000"
 
@@ -100,6 +101,27 @@ class Settings(BaseSettings):
     ENABLE_METRICS: bool = True
     LOG_FORMAT: str = "json"  # "json" or "text" (text for local dev)
     METRICS_API_KEY: str = ""  # If set, /metrics requires X-Metrics-Token header
+
+    @model_validator(mode="after")
+    def reject_insecure_production_defaults(self):
+        if self.ENVIRONMENT.lower() != "production":
+            return self
+        insecure = []
+        if self.SECRET_KEY.startswith("development-secret") or len(self.SECRET_KEY) < 32:
+            insecure.append("SECRET_KEY")
+        if self.POSTGRES_PASSWORD == "postgres":
+            insecure.append("POSTGRES_PASSWORD")
+        if self.MINIO_ACCESS_KEY == "minioadmin" or self.MINIO_SECRET_KEY == "minioadmin":
+            insecure.append("MINIO credentials")
+        if self.MEILISEARCH_MASTER_KEY == "meilisearch_master_key_12345":
+            insecure.append("MEILISEARCH_MASTER_KEY")
+        if self.LIVEKIT_API_SECRET == "secret":
+            insecure.append("LIVEKIT_API_SECRET")
+        if insecure:
+            raise ValueError(
+                "Production configuration uses insecure defaults: " + ", ".join(insecure)
+            )
+        return self
 
 
 settings = Settings()

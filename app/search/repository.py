@@ -5,8 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.communities.models import Community, CommunityMembership
+from app.communities.access import community_access_filters
 from app.interests.models import Interest
 from app.posts.models import Post
+from app.posts.access import post_access_filters
 from app.users.models import Block, Follow, Profile, User
 
 
@@ -98,15 +100,8 @@ class SearchRepository:
         offset: int = 0,
     ) -> Tuple[Sequence[Community], int]:
         clean_q = f"%{query.strip().lower()}%"
-        joined_sub = self._get_joined_communities_subquery(current_user_id)
-
-        accessible_cond = or_(
-            Community.is_private.is_(False),
-            Community.id.in_(joined_sub),
-        )
-
         filters = [
-            accessible_cond,
+            *community_access_filters(current_user_id),
             or_(
                 func.lower(Community.name).like(clean_q),
                 func.lower(Community.slug).like(clean_q),
@@ -139,34 +134,8 @@ class SearchRepository:
         offset: int = 0,
     ) -> Tuple[Sequence[Post], int]:
         clean_q = f"%{query.strip().lower()}%"
-        following_sub = self._get_following_subquery(current_user_id)
-        joined_comm_sub = self._get_joined_communities_subquery(current_user_id)
-
-        public_communities_sub = select(Community.id).where(
-            Community.is_private.is_(False)
-        )
-
-        accessible_community = or_(
-            Post.community_id.is_(None),
-            Post.community_id.in_(public_communities_sub),
-            Post.community_id.in_(joined_comm_sub),
-        )
-
-        visibility_cond = or_(
-            Post.visibility == "public",
-            (Post.visibility == "followers_only")
-            & (
-                Post.author_id.in_(following_sub)
-                | (Post.author_id == current_user_id if current_user_id else False)
-            ),
-            (Post.visibility == "private")
-            & (Post.author_id == current_user_id if current_user_id else False),
-        )
-
         filters = [
-            *self._get_blocked_conditions(Post.author_id, current_user_id),
-            accessible_community,
-            visibility_cond,
+            *post_access_filters(current_user_id),
             or_(
                 func.lower(Post.title).like(clean_q),
                 func.lower(Post.content).like(clean_q),
@@ -235,13 +204,25 @@ class SearchRepository:
     async def fetch_all_communities_for_sync(
         self, db: AsyncSession
     ) -> Sequence[Community]:
-        stmt = select(Community).options(selectinload(Community.interest))
+        stmt = (
+            select(Community)
+            .where(Community.is_private.is_(False))
+            .options(selectinload(Community.interest))
+        )
         return (await db.execute(stmt)).scalars().all()
 
     async def fetch_all_posts_for_sync(self, db: AsyncSession) -> Sequence[Post]:
-        stmt = select(Post).options(
-            selectinload(Post.author).selectinload(User.profile),
-            selectinload(Post.community),
+        public_communities = select(Community.id).where(Community.is_private.is_(False))
+        stmt = (
+            select(Post)
+            .where(
+                Post.visibility == "public",
+                or_(Post.community_id.is_(None), Post.community_id.in_(public_communities)),
+            )
+            .options(
+                selectinload(Post.author).selectinload(User.profile),
+                selectinload(Post.community),
+            )
         )
         return (await db.execute(stmt)).scalars().all()
 

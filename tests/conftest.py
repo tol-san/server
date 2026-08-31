@@ -1,11 +1,13 @@
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.core.storage import storage_service
 
 # In-memory SQLite async engine for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -29,6 +31,21 @@ def mock_meilisearch_healthy():
     with patch("app.core.meilisearch.meilisearch_service.is_healthy", new_callable=AsyncMock) as m:
         m.return_value = False
         yield
+
+
+@pytest.fixture(autouse=True)
+def mock_object_storage():
+    previous = storage_service._client
+    client = MagicMock()
+    client.bucket_exists.return_value = True
+    client.presigned_get_object.side_effect = (
+        lambda bucket, object_name, **_: f"http://storage.test/{bucket}/{object_name}?signature=test"
+    )
+    storage_service._client = client
+    try:
+        yield client
+    finally:
+        storage_service._client = previous
 
 
 @pytest.fixture(autouse=True)

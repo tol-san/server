@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.communities.models import Community
 from app.posts.models import Post, PostLike, PostMedia, SavedPost
+from app.posts.access import post_access_filters
 from app.posts.schemas import MediaItemCreate
 from app.users.models import Profile, User
 
@@ -132,10 +133,15 @@ class PostRepository:
         post_type: Optional[str] = None,
         visibility: Optional[str] = None,
         search: Optional[str] = None,
+        viewer_id: Optional[uuid.UUID] = None,
+        viewer_is_superuser: bool = False,
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[Sequence[Post], int]:
-        filters = []
+        filters = post_access_filters(
+            viewer_id,
+            is_superuser=viewer_is_superuser,
+        )
         if author_id is not None:
             filters.append(Post.author_id == author_id)
         if community_id is not None:
@@ -271,17 +277,23 @@ class PostRepository:
         user_id: uuid.UUID,
         limit: int = 20,
         offset: int = 0,
+        viewer_is_superuser: bool = False,
     ) -> Tuple[Sequence[Post], int]:
+        access_filters = post_access_filters(
+            user_id,
+            is_superuser=viewer_is_superuser,
+        )
         count_stmt = (
             select(func.count(SavedPost.id))
-            .where(SavedPost.user_id == user_id)
+            .join(Post, Post.id == SavedPost.post_id)
+            .where(SavedPost.user_id == user_id, *access_filters)
         )
         total = (await db.execute(count_stmt)).scalar() or 0
 
         stmt = (
             select(Post)
             .join(SavedPost, SavedPost.post_id == Post.id)
-            .where(SavedPost.user_id == user_id)
+            .where(SavedPost.user_id == user_id, *access_filters)
             .options(
                 selectinload(Post.author).selectinload(User.profile),
                 selectinload(Post.community),
@@ -293,6 +305,32 @@ class PostRepository:
         )
         result = await db.execute(stmt)
         return result.scalars().all(), total
+
+    async def get_viewer_engagement(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        post_ids: Sequence[uuid.UUID],
+    ) -> Tuple[set[uuid.UUID], set[uuid.UUID]]:
+        if not post_ids:
+            return set(), set()
+        liked = set(
+            (await db.execute(
+                select(PostLike.post_id).where(
+                    PostLike.user_id == user_id,
+                    PostLike.post_id.in_(post_ids),
+                )
+            )).scalars().all()
+        )
+        saved = set(
+            (await db.execute(
+                select(SavedPost.post_id).where(
+                    SavedPost.user_id == user_id,
+                    SavedPost.post_id.in_(post_ids),
+                )
+            )).scalars().all()
+        )
+        return liked, saved
 
     async def list_post_reactors(
         self,

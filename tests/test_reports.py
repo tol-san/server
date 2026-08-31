@@ -112,6 +112,13 @@ async def test_report_submission_and_admin_workflow(async_client: AsyncClient, d
     assert resolve_resp.status_code == 200
     assert resolve_resp.json()["status"] == "RESOLVED"
     assert resolve_resp.json()["resolution_action"] == "user_suspended"
+    revoked = await async_client.get("/api/v1/profiles/me", headers=spammer["headers"])
+    assert revoked.status_code == 401
+
+    duplicate = await async_client.post(
+        "/api/v1/reports", headers=reporter["headers"], json=report_payload
+    )
+    assert duplicate.status_code == 201  # terminal reports may be filed again
 
 
 @pytest.mark.asyncio
@@ -168,3 +175,32 @@ async def test_community_owner_moderation_permissions(async_client: AsyncClient)
     # 3. Regular member attempting to list reports gets 403 Forbidden
     forbidden_resp = await async_client.get("/api/v1/reports", headers=member["headers"])
     assert forbidden_resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_report_scope_is_derived_from_target(async_client: AsyncClient):
+    reporter = await create_user(async_client, "scope_reporter", "scope_reporter@example.com")
+    author = await create_user(async_client, "scope_author", "scope_author@example.com")
+    owner = await create_user(async_client, "scope_owner", "scope_owner@example.com")
+    community = await async_client.post(
+        "/api/v1/communities",
+        headers=owner["headers"],
+        json={"name": "Scope Community"},
+    )
+    community_id = community.json()["id"]
+    post = await async_client.post(
+        "/api/v1/posts",
+        headers=author["headers"],
+        json={"post_type": "text", "content": "personal target"},
+    )
+    response = await async_client.post(
+        "/api/v1/reports",
+        headers=reporter["headers"],
+        json={
+            "report_type": "post",
+            "target_id": post.json()["id"],
+            "community_id": community_id,
+            "reason": "spam",
+        },
+    )
+    assert response.status_code == 400

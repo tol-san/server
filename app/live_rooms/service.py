@@ -72,6 +72,27 @@ class LiveRoomService:
         self.comm_repo = comm_repo
         self.tracker = tracker
 
+    async def _require_member(
+        self, db: AsyncSession, community_id: uuid.UUID, current_user: User
+    ):
+        if current_user.is_superuser:
+            return None
+        member = await self.comm_repo.get_membership(
+            db, community_id=community_id, user_id=current_user.id
+        )
+        if not member:
+            raise ForbiddenException("You must be a community member to access this live room.")
+        return member
+
+    async def _require_host_role(
+        self, db: AsyncSession, community_id: uuid.UUID, current_user: User
+    ) -> None:
+        if current_user.is_superuser:
+            return
+        member = await self._require_member(db, community_id, current_user)
+        if member.role not in ("owner", "moderator"):
+            raise ForbiddenException("Only community owners/moderators can manage live rooms.")
+
     # ─────────────────────────────────────────────────────────────────────────
     # Room CRUD
     # ─────────────────────────────────────────────────────────────────────────
@@ -121,6 +142,8 @@ class LiveRoomService:
                 },
             )
 
+        await db.commit()
+
         return _map_room(room)
 
     async def get_room(
@@ -132,6 +155,7 @@ class LiveRoomService:
         room = await self.repo.get_by_id(db, room_id)
         if not room:
             raise NotFoundException("Live room not found.")
+        await self._require_member(db, room.community_id, current_user)
         # Get current viewer count from Redis if LIVE
         current_viewers = 0
         if room.status == LiveRoom.Status.LIVE:
@@ -150,8 +174,7 @@ class LiveRoomService:
         room = await self.repo.get_by_id(db, room_id)
         if not room:
             raise NotFoundException("Live room not found.")
-        if room.created_by != current_user.id and not current_user.is_superuser:
-            raise ForbiddenException("Only the room creator can update it.")
+        await self._require_host_role(db, room.community_id, current_user)
         updates = payload.model_dump(exclude_unset=True)
         if updates:
             room = await self.repo.update(db, room_id, **updates)
@@ -168,11 +191,10 @@ class LiveRoomService:
         room_id: uuid.UUID,
         current_user: User,
     ) -> LiveTokenResponse:
-        room = await self.repo.get_by_id(db, room_id)
+        room = await self.repo.get_by_id_for_update(db, room_id)
         if not room:
             raise NotFoundException("Live room not found.")
-        if room.created_by != current_user.id and not current_user.is_superuser:
-            raise ForbiddenException("Only the room creator can start a session.")
+        await self._require_host_role(db, room.community_id, current_user)
         if room.status == LiveRoom.Status.LIVE:
             raise BadRequestException("A session is already live for this room.")
         if room.status == LiveRoom.Status.ENDED:
@@ -271,11 +293,10 @@ class LiveRoomService:
         room_id: uuid.UUID,
         current_user: User,
     ) -> LiveSessionResponse:
-        room = await self.repo.get_by_id(db, room_id)
+        room = await self.repo.get_by_id_for_update(db, room_id)
         if not room:
             raise NotFoundException("Live room not found.")
-        if room.created_by != current_user.id and not current_user.is_superuser:
-            raise ForbiddenException("Only the room creator can end the session.")
+        await self._require_host_role(db, room.community_id, current_user)
         if room.status != LiveRoom.Status.LIVE:
             raise BadRequestException("Room is not currently live.")
 
@@ -330,11 +351,12 @@ class LiveRoomService:
     # ─────────────────────────────────────────────────────────────────────────
 
     async def get_metrics(
-        self, db: AsyncSession, room_id: uuid.UUID
+        self, db: AsyncSession, room_id: uuid.UUID, current_user: User
     ) -> LiveMetricsResponse:
         room = await self.repo.get_by_id(db, room_id)
         if not room:
             raise NotFoundException("Live room not found.")
+        await self._require_member(db, room.community_id, current_user)
 
         session = await self.repo.get_active_session(db, room_id)
 
@@ -386,7 +408,7 @@ class LiveRoomService:
         Process a LiveKit webhook event with signature verification and idempotency.
         Correct viewer count: only participant_joined/left webhooks update Redis.
         """
-        import json as _json
+        import hashlib
 
         # Verify LiveKit JWT signature
         try:
@@ -400,8 +422,13 @@ class LiveRoomService:
             logger.warning("LiveKit webhook signature verification failed: %s", exc)
             raise BadRequestException("Invalid webhook signature.")
 
-        event_id = getattr(event, "id", None) or str(uuid.uuid4())
-        event_type = event.__class__.__name__
+        event_id = getattr(event, "id", None) or hashlib.sha256(body).hexdigest()
+        raw_event_type = getattr(event, "event", None) or event.__class__.__name__
+        event_type = {
+            "participant_joined": "ParticipantJoined",
+            "participant_left": "ParticipantLeft",
+            "room_finished": "RoomFinished",
+        }.get(str(raw_event_type), str(raw_event_type))
 
         # Idempotency check
         is_new = await self.repo.try_store_provider_event(
@@ -417,64 +444,70 @@ class LiveRoomService:
 
         # Route by event type
         await self._route_webhook_event(db, event, event_type)
+        await self.repo.mark_provider_event_processed(
+            db, provider="LIVEKIT", provider_event_id=str(event_id)
+        )
+        await db.commit()
 
         return {"status": "processed", "event_type": event_type}
 
     async def _route_webhook_event(self, db: AsyncSession, event, event_type: str) -> None:
         """Route processed webhook to the appropriate handler."""
-        try:
-            if event_type == "ParticipantJoined":
-                room_name = event.room.name if hasattr(event, "room") else None
-                participant_identity = event.participant.identity if hasattr(event, "participant") else None
-                if room_name and participant_identity:
-                    room = await self.repo.get_by_provider_room_name(db, room_name)
-                    if room:
-                        session = await self.repo.get_active_session(db, room.id)
-                        if session:
-                            await self.tracker.participant_joined(
-                                str(session.id), participant_identity
-                            )
+        if event_type == "ParticipantJoined":
+            room_name = event.room.name if hasattr(event, "room") else None
+            participant_identity = (
+                event.participant.identity if hasattr(event, "participant") else None
+            )
+            if room_name and participant_identity:
+                room = await self.repo.get_by_provider_room_name(db, room_name)
+                if room:
+                    session = await self.repo.get_active_session(db, room.id)
+                    if session:
+                        await self.tracker.participant_joined(
+                            str(session.id), participant_identity
+                        )
 
-            elif event_type == "ParticipantLeft":
-                room_name = event.room.name if hasattr(event, "room") else None
-                participant_identity = event.participant.identity if hasattr(event, "participant") else None
-                if room_name and participant_identity:
-                    room = await self.repo.get_by_provider_room_name(db, room_name)
-                    if room:
-                        session = await self.repo.get_active_session(db, room.id)
-                        if session:
-                            await self.tracker.participant_left(
-                                str(session.id), participant_identity
-                            )
+        elif event_type == "ParticipantLeft":
+            room_name = event.room.name if hasattr(event, "room") else None
+            participant_identity = (
+                event.participant.identity if hasattr(event, "participant") else None
+            )
+            if room_name and participant_identity:
+                room = await self.repo.get_by_provider_room_name(db, room_name)
+                if room:
+                    session = await self.repo.get_active_session(db, room.id)
+                    if session:
+                        await self.tracker.participant_left(
+                            str(session.id), participant_identity
+                        )
 
-            elif event_type == "RoomFinished":
-                room_name = event.room.name if hasattr(event, "room") else None
-                if room_name:
-                    room = await self.repo.get_by_provider_room_name(db, room_name)
-                    if room and room.status == LiveRoom.Status.LIVE:
-                        # Auto-close the session
-                        session = await self.repo.get_active_session(db, room.id)
-                        if session:
-                            sid = str(session.id)
-                            now = datetime.now(timezone.utc)
-                            duration = int((now - session.started_at).total_seconds())
-                            peak = await self.tracker.get_peak_viewers(sid)
-                            unique = await self.tracker.get_unique_viewers(sid)
-                            total_joins = await self.tracker.get_total_joins(sid)
-                            await self.repo.close_session(
-                                db, session.id,
-                                ended_at=now,
-                                duration_seconds=duration,
-                                peak_viewers=peak,
-                                unique_viewers=unique,
-                                total_joins=total_joins,
-                            )
-                            await self.repo.update_status(db, room.id, LiveRoom.Status.ENDED)
-                            await db.commit()
-                            await self.tracker.cleanup(sid)
-
-        except Exception as exc:
-            logger.warning("Webhook routing error for %s: %s", event_type, exc)
+        elif event_type == "RoomFinished":
+            room_name = event.room.name if hasattr(event, "room") else None
+            if room_name:
+                room = await self.repo.get_by_provider_room_name(db, room_name)
+                if room and room.status == LiveRoom.Status.LIVE:
+                    session = await self.repo.get_active_session(db, room.id)
+                    if session:
+                        sid = str(session.id)
+                        now = datetime.now(timezone.utc)
+                        duration = int((now - session.started_at).total_seconds())
+                        peak = await self.tracker.get_peak_viewers(sid)
+                        unique = await self.tracker.get_unique_viewers(sid)
+                        total_joins = await self.tracker.get_total_joins(sid)
+                        await self.repo.close_session(
+                            db,
+                            session.id,
+                            ended_at=now,
+                            duration_seconds=duration,
+                            peak_viewers=peak,
+                            unique_viewers=unique,
+                            total_joins=total_joins,
+                        )
+                        await self.repo.update_status(
+                            db, room.id, LiveRoom.Status.ENDED
+                        )
+                        await db.commit()
+                        await self.tracker.cleanup(sid)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Reconciliation

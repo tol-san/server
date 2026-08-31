@@ -16,10 +16,7 @@ ALLOWED_REPORT_REASONS = {
 ALLOWED_REPORT_STATUSES = {"PENDING", "REVIEWING", "RESOLVED", "REJECTED"}
 ALLOWED_RESOLUTION_ACTIONS = {
     "none",
-    "content_deleted",
-    "user_warned",
     "user_suspended",
-    "community_closed",
     "dismissed",
 }
 
@@ -51,7 +48,7 @@ class ReportStatusUpdateRequest(BaseModel):
     )
     resolution_action: Optional[str] = Field(
         "none",
-        description="Action applied: none, content_deleted, user_warned, user_suspended, community_closed, dismissed",
+        description="Action applied: none, user_suspended, dismissed",
     )
     resolution_notes: Optional[str] = Field(
         None, max_length=1000, description="Moderator resolution notes"

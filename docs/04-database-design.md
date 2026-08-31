@@ -91,5 +91,8 @@ erDiagram
 - **`community_members`**: `UNIQUE(user_id, community_id)` ensuring single membership per community.
 - **`posts`**: Indexes on `author_id`, `community_id`, `created_at`, and `visibility`.
 - **`notifications`**: Indexes on `recipient_id`, `actor_id`, `is_read`, and `created_at`.
-- **`reports`**: Indexes on `reporter_id`, `target_id`, `community_id`, `status`, and `created_at`.
+- **`reports`**: Indexes on `reporter_id`, `target_id`, `community_id`, `status`, and `created_at`, plus a partial unique index preventing duplicate `PENDING`/`REVIEWING` reports per reporter/type/target.
+- **`users.token_version`**: Revokes older JWTs after password changes, password resets, and account suspension.
+- **`live_sessions`**: A partial unique index allows at most one active (`ended_at IS NULL`) session per room.
+- **`provider_events`**: Unique provider/event identity enforces webhook idempotency; `processed_at` is set only after successful routing.
 - **`outbox_events`**: Indexes on `aggregate_type`, `event_type`, `created_at`, and `published_at`.

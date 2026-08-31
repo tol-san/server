@@ -157,8 +157,13 @@ async def test_notification_management_workflow(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_typing_indicator_pubsub(async_client: AsyncClient):
     user = await create_user(async_client, "typing_user", "typing@example.com")
+    community = await async_client.post(
+        "/api/v1/communities",
+        headers=user["headers"],
+        json={"name": "Typing Community"},
+    )
 
-    payload = {"channel": "community_chat_general", "is_typing": True}
+    payload = {"channel": community.json()["id"], "is_typing": True}
     resp = await async_client.post("/api/v1/notifications/typing", headers=user["headers"], json=payload)
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"

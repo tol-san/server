@@ -47,6 +47,10 @@ Backend exposes:
 - SSE: `GET /api/v1/notifications/stream`
 - WebSocket: `/api/v1/notifications/ws`
 
+Before opening the WebSocket, request a short-lived one-time ticket with
+`POST /api/v1/notifications/ws-ticket`, then connect with `?ticket=<ticket>`.
+Do not put access tokens in WebSocket URLs.
+
 Frontend decision:
 - use **one real-time notification transport per session**;
 - do not subscribe to SSE and WebSocket simultaneously unless deduplication is explicitly designed.
