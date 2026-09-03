@@ -46,11 +46,18 @@
 | `POST` | `/api/v1/auth/verify-otp` | Verify an email-bound reset OTP and return a reset-only one-time grant (no session tokens) |
 | `POST` | `/api/v1/auth/reset-password` | Consume the grant, change the password, and revoke older sessions |
 | `POST` | `/api/v1/auth/change-password` | Change password for authenticated user |
+| `GET` | `/api/v1/auth/sessions` | List all active signed-in devices and sessions for authenticated user |
+| `DELETE` | `/api/v1/auth/sessions/{session_id}` | Revoke a specific active session and blacklist its refresh token |
+| `DELETE` | `/api/v1/auth/sessions/other` | Revoke all other active sessions except the current device |
 
 ### Users & Profiles (`/api/v1/users`, `/api/v1/profiles`)
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/v1/users/check-username` | Check real-time username availability (`?username=...`) |
+| `GET` | `/api/v1/users/me/privacy` | Get current user's privacy and visibility preferences |
+| `PATCH` | `/api/v1/users/me/privacy` | Update privacy settings (`is_private`, `allow_comments`, `allow_mentions`, `show_activity_status`, `search_discoverable`) |
+| `POST` | `/api/v1/users/me/deactivate` | Temporarily deactivate account, revoking sessions and hiding profile |
+| `DELETE` | `/api/v1/users/me` | Permanently delete user account and cascade dependent records |
 | `GET` | `/api/v1/users/{username}` | Get public user profile |
 | `GET` | `/api/v1/users/{user_id}/followers` | List user's followers |
 | `GET` | `/api/v1/users/{user_id}/following` | List users being followed |
@@ -58,6 +65,7 @@
 | `DELETE` | `/api/v1/users/{user_id}/follow` | Unfollow a user |
 | `POST` | `/api/v1/users/{user_id}/block` | Block a user |
 | `DELETE` | `/api/v1/users/{user_id}/block` | Unblock a user |
+
 | `GET` | `/api/v1/users/me/blocked` | List users blocked by current user |
 | `GET` | `/api/v1/users/{user_id}/relationship` | Check bidirectional follow/block relationship |
 | `GET` | `/api/v1/profiles/me` | Get current user's profile |
@@ -175,9 +183,12 @@ every moderation endpoint still enforces authorization independently.
 | --- | --- | --- |
 | `GET` | `/api/v1/notifications` | Paginated user notifications with `unread_only` filter |
 | `GET` | `/api/v1/notifications/unread-count` | Get total unread notifications count for badge |
+| `GET` | `/api/v1/notifications/preferences` | Retrieve notification delivery and quiet hours preferences |
+| `PATCH` | `/api/v1/notifications/preferences` | Update category toggles (`likes`, `comments`, `follows`, `mentions`, `community`, `push`, `email`, `quiet_hours`) |
 | `PATCH` | `/api/v1/notifications/{notification_id}/read` | Mark single notification as read |
 | `POST` | `/api/v1/notifications/read-all` | Mark all notifications as read |
 | `DELETE` | `/api/v1/notifications/{notification_id}` | Delete notification from user history |
+
 | `GET` | `/api/v1/notifications/stream` | Server-Sent Events (SSE) stream powered by Redis Streams |
 | `WS` | `/api/v1/notifications/ws` | Real-time WebSocket connection for live notifications |
 | `POST` | `/api/v1/notifications/ws-ticket` | Issue a short-lived, single-use notification WebSocket ticket |

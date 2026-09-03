@@ -57,6 +57,18 @@ async def get_current_active_user(
     return current_user
 
 
+async def get_current_jti(
+    token: str = Depends(oauth2_scheme),
+) -> Optional[str]:
+    """Extract session JTI from current access token if present."""
+    try:
+        payload = decode_token(token)
+        return payload.get("jti")
+    except Exception:
+        return None
+
+
+
 async def get_current_active_superuser(
     current_user: User = Depends(get_current_user),
 ) -> User:

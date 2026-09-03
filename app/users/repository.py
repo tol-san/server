@@ -4,7 +4,7 @@ from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.users.models import Block, Follow, Profile, User
+from app.users.models import Block, Follow, Profile, User, UserPrivacySettings
 
 
 class UserRepository:
@@ -335,5 +335,42 @@ class UserRepository:
         result = await db.execute(stmt)
         return result.scalars().all(), total
 
+    async def get_or_create_privacy(self, db: AsyncSession, user_id: uuid.UUID) -> UserPrivacySettings:
+        stmt = select(UserPrivacySettings).where(UserPrivacySettings.user_id == user_id)
+        result = await db.execute(stmt)
+        privacy = result.scalar_one_or_none()
+        if not privacy:
+            privacy = UserPrivacySettings(user_id=user_id)
+            db.add(privacy)
+            await db.commit()
+            await db.refresh(privacy)
+        return privacy
+
+    async def update_privacy(self, db: AsyncSession, user_id: uuid.UUID, **kwargs) -> UserPrivacySettings:
+        privacy = await self.get_or_create_privacy(db, user_id)
+        for key, value in kwargs.items():
+            if value is not None and hasattr(privacy, key):
+                setattr(privacy, key, value)
+        await db.commit()
+        await db.refresh(privacy)
+        return privacy
+
+    async def get_owned_communities_with_members(self, db: AsyncSession, user_id: uuid.UUID) -> Sequence:
+        from app.communities.models import Community
+        stmt = select(Community).where(Community.owner_id == user_id, Community.member_count > 1)
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    async def delete_user_hard(self, db: AsyncSession, user: User) -> None:
+        from app.auth.models import UserSession
+        from app.notifications.models import NotificationPreferences
+        from sqlalchemy import delete
+        await db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+        await db.execute(delete(NotificationPreferences).where(NotificationPreferences.user_id == user.id))
+        await db.delete(user)
+        await db.commit()
+
+
 
 user_repository = UserRepository()
+

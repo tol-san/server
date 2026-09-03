@@ -5,6 +5,10 @@ import uuid
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import datetime, timezone
+from sqlalchemy import select, update
+
+from app.auth.models import UserSession
 from app.auth.schemas import (
     ChangePasswordRequest,
     LoginRequest,
@@ -13,6 +17,7 @@ from app.auth.schemas import (
     TokenResponse,
     UserRegisterRequest,
     UserResponse,
+    UserSessionResponse,
     VerifyOtpRequest,
     VerifyOtpResponse,
 )
@@ -22,6 +27,7 @@ from app.core.exceptions import (
     BadRequestException,
     EmailAlreadyExistsException,
     ForbiddenException,
+    NotFoundException,
     UnauthorizedException,
     UsernameAlreadyExistsException,
 )
@@ -184,8 +190,10 @@ class AuthService:
 
         await self._index_user_to_search(user)
 
-        access_token = create_access_token(user.id, user.token_version)
-        refresh_token, _ = create_refresh_token(user.id, user.token_version)
+        refresh_token, jti = create_refresh_token(user.id, user.token_version)
+        access_token = create_access_token(user.id, user.token_version, jti=jti)
+
+        await self._record_session(db, user.id, jti, None, None)
 
         return TokenResponse(
             access_token=access_token,
@@ -241,6 +249,8 @@ class AuthService:
         self,
         db: AsyncSession,
         payload: LoginRequest,
+        client_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> TokenResponse:
         user = await self.user_repo.get_by_email_or_username(db, payload.identifier)
         if not user:
@@ -252,8 +262,10 @@ class AuthService:
         if not user.is_active:
             raise ForbiddenException("User account is deactivated.")
 
-        access_token = create_access_token(user.id, user.token_version)
-        refresh_token, _ = create_refresh_token(user.id, user.token_version)
+        refresh_token, jti = create_refresh_token(user.id, user.token_version)
+        access_token = create_access_token(user.id, user.token_version, jti=jti)
+
+        await self._record_session(db, user.id, jti, client_ip, user_agent)
 
         return TokenResponse(
             access_token=access_token,
@@ -267,6 +279,8 @@ class AuthService:
         self,
         db: AsyncSession,
         refresh_token_str: str,
+        client_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> TokenRefreshResponse:
         payload = decode_token(refresh_token_str)
 
@@ -298,8 +312,23 @@ class AuthService:
         await blacklist_token(jti, remaining_ttl)
 
         # Issue new token pair
-        new_access_token = create_access_token(user.id, user.token_version)
-        new_refresh_token, _ = create_refresh_token(user.id, user.token_version)
+        new_refresh_token, new_jti = create_refresh_token(user.id, user.token_version)
+        new_access_token = create_access_token(user.id, user.token_version, jti=new_jti)
+
+        # Rotate session in DB
+        now = datetime.now(timezone.utc)
+        stmt = (
+            update(UserSession)
+            .where(UserSession.refresh_jti == jti)
+            .values(
+                refresh_jti=new_jti,
+                last_active_at=now,
+                ip_address=client_ip if client_ip else UserSession.ip_address,
+                user_agent=user_agent if user_agent else UserSession.user_agent,
+            )
+        )
+        await db.execute(stmt)
+        await db.commit()
 
         return TokenRefreshResponse(
             access_token=new_access_token,
@@ -308,7 +337,7 @@ class AuthService:
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
 
-    async def logout(self, refresh_token_str: str) -> None:
+    async def logout(self, db: AsyncSession, refresh_token_str: str) -> None:
         try:
             payload = decode_token(refresh_token_str)
             if payload.get("type") == "refresh":
@@ -317,8 +346,15 @@ class AuthService:
                 if jti:
                     remaining_ttl = max(int(exp - time.time()), 1)
                     await blacklist_token(jti, remaining_ttl)
+                    # Mark session revoked in DB
+                    stmt = (
+                        update(UserSession)
+                        .where(UserSession.refresh_jti == jti)
+                        .values(is_revoked=True)
+                    )
+                    await db.execute(stmt)
+                    await db.commit()
         except Exception:
-            # If token is invalid or expired, logout is considered successful
             pass
 
     async def request_password_reset(
@@ -410,5 +446,121 @@ class AuthService:
         hashed_password = get_password_hash(payload.new_password)
         await self.user_repo.update_password(db, user, hashed_password)
 
+    def _parse_device_name(self, user_agent: Optional[str]) -> str:
+        if not user_agent:
+            return "Unknown Device"
+        ua = user_agent.lower()
+        if "dart" in ua or "flutter" in ua:
+            if "android" in ua:
+                return "Flutter App (Android)"
+            if "iphone" in ua or "ipad" in ua:
+                return "Flutter App (iOS)"
+            return "GenZ Media App"
+        if "iphone" in ua:
+            return "iPhone"
+        if "ipad" in ua:
+            return "iPad"
+        if "android" in ua:
+            return "Android Device"
+        if "macintosh" in ua or "mac os" in ua:
+            return "Mac"
+        if "windows" in ua:
+            return "Windows PC"
+        if "linux" in ua:
+            return "Linux PC"
+        return "Web Browser"
+
+    async def _record_session(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        refresh_jti: str,
+        client_ip: Optional[str],
+        user_agent: Optional[str],
+    ) -> UserSession:
+        device_name = self._parse_device_name(user_agent)
+        now = datetime.now(timezone.utc)
+        session = UserSession(
+            user_id=user_id,
+            refresh_jti=refresh_jti,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            device_name=device_name,
+            last_active_at=now,
+            created_at=now,
+            is_revoked=False,
+        )
+        db.add(session)
+        await db.commit()
+        await db.refresh(session)
+        return session
+
+    async def get_user_sessions(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        current_jti: Optional[str] = None,
+    ) -> list[UserSessionResponse]:
+        stmt = (
+            select(UserSession)
+            .where(UserSession.user_id == user_id, UserSession.is_revoked.is_(False))
+            .order_by(UserSession.last_active_at.desc())
+        )
+        result = await db.execute(stmt)
+        sessions = result.scalars().all()
+        return [
+            UserSessionResponse(
+                id=s.id,
+                device_name=s.device_name,
+                ip_address=s.ip_address,
+                last_active_at=s.last_active_at,
+                created_at=s.created_at,
+                is_current=(s.refresh_jti == current_jti),
+            )
+            for s in sessions
+        ]
+
+    async def revoke_session(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> None:
+        stmt = select(UserSession).where(
+            UserSession.id == session_id,
+            UserSession.user_id == user_id,
+        )
+        result = await db.execute(stmt)
+        session = result.scalar_one_or_none()
+        if not session or session.is_revoked:
+            raise NotFoundException("Session not found.")
+
+        session.is_revoked = True
+        await db.commit()
+        await blacklist_token(session.refresh_jti, settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400)
+
+    async def revoke_other_sessions(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        current_jti: Optional[str] = None,
+    ) -> int:
+        stmt = select(UserSession).where(
+            UserSession.user_id == user_id,
+            UserSession.is_revoked.is_(False),
+        )
+        if current_jti:
+            stmt = stmt.where(UserSession.refresh_jti != current_jti)
+
+        result = await db.execute(stmt)
+        sessions = result.scalars().all()
+        for s in sessions:
+            s.is_revoked = True
+            await blacklist_token(s.refresh_jti, settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400)
+
+        await db.commit()
+        return len(sessions)
+
 
 auth_service = AuthService()
+

@@ -5,7 +5,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.notifications.models import Notification
+from app.notifications.models import Notification, NotificationPreferences
 from app.users.models import User
 
 
@@ -137,5 +137,32 @@ class NotificationRepository:
         await db.commit()
         return True
 
+    async def get_or_create_preferences(
+        self, db: AsyncSession, user_id: uuid.UUID
+    ) -> NotificationPreferences:
+        stmt = select(NotificationPreferences).where(
+            NotificationPreferences.user_id == user_id
+        )
+        result = await db.execute(stmt)
+        prefs = result.scalar_one_or_none()
+        if not prefs:
+            prefs = NotificationPreferences(user_id=user_id)
+            db.add(prefs)
+            await db.commit()
+            await db.refresh(prefs)
+        return prefs
+
+    async def update_preferences(
+        self, db: AsyncSession, user_id: uuid.UUID, **kwargs
+    ) -> NotificationPreferences:
+        prefs = await self.get_or_create_preferences(db, user_id)
+        for key, value in kwargs.items():
+            if value is not None and hasattr(prefs, key):
+                setattr(prefs, key, value)
+        await db.commit()
+        await db.refresh(prefs)
+        return prefs
+
 
 notification_repository = NotificationRepository()
+

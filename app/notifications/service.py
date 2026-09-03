@@ -14,6 +14,8 @@ from app.notifications.repository import (
 )
 from app.notifications.schemas import (
     NotificationActor,
+    NotificationPreferencesResponse,
+    NotificationPreferencesUpdateRequest,
     NotificationResponse,
     PaginatedNotificationsResponse,
     UnreadCountResponse,
@@ -74,6 +76,21 @@ class NotificationService:
         # Don't notify oneself
         if actor_id and actor_id == recipient_id:
             return None  # type: ignore
+
+        # Check recipient notification preferences
+        prefs = await self.repo.get_or_create_preferences(db, recipient_id)
+        ntype = notification_type.lower()
+        if ("like" in ntype or "reaction" in ntype) and not prefs.likes_enabled:
+            return None  # type: ignore
+        if ("comment" in ntype or "reply" in ntype) and not prefs.comments_enabled:
+            return None  # type: ignore
+        if ("follow" in ntype) and not prefs.follows_enabled:
+            return None  # type: ignore
+        if ("mention" in ntype) and not prefs.mentions_enabled:
+            return None  # type: ignore
+        if ("community" in ntype) and not prefs.community_enabled:
+            return None  # type: ignore
+
 
         # 1. Persist notification in PostgreSQL
         notification = await self.repo.create(
@@ -188,6 +205,23 @@ class NotificationService:
         from app.core.cache import cache_service
         await cache_service.delete(f"cache:notif:unread:{current_user.id}")
         return {"message": "Notification deleted successfully."}
+
+
+    async def get_preferences(
+        self, db: AsyncSession, user_id: uuid.UUID
+    ) -> NotificationPreferencesResponse:
+        prefs = await self.repo.get_or_create_preferences(db, user_id)
+        return NotificationPreferencesResponse.model_validate(prefs)
+
+    async def update_preferences(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        payload: NotificationPreferencesUpdateRequest,
+    ) -> NotificationPreferencesResponse:
+        updates = payload.model_dump(exclude_unset=True)
+        prefs = await self.repo.update_preferences(db, user_id, **updates)
+        return NotificationPreferencesResponse.model_validate(prefs)
 
     # --- Real-Time Stream / SSE Generator ---
     async def sse_event_generator(

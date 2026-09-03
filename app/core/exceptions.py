@@ -89,6 +89,26 @@ class ServiceUnavailableException(AppException):
         )
 
 
+class ConflictException(AppException):
+    def __init__(self, message: str = "A conflict occurred."):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="CONFLICT",
+        )
+
+
+class ValidationException(AppException):
+    def __init__(self, message: str = "Validation failed."):
+        super().__init__(
+            message=message,
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            error_code="VALIDATION_ERROR",
+        )
+
+
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnauthorizedException)
     async def unauthorized_exception_handler(request: Request, exc: UnauthorizedException):

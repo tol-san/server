@@ -168,3 +168,15 @@ class ChangePasswordRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class UserSessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    device_name: Optional[str] = None
+    ip_address: Optional[str] = None
+    last_active_at: datetime
+    created_at: datetime
+    is_current: bool = False
+

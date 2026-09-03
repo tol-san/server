@@ -24,6 +24,7 @@ def create_access_token(
     subject: Union[str, uuid.UUID],
     token_version: int = 0,
     expires_delta: Optional[timedelta] = None,
+    jti: Optional[str] = None,
 ) -> str:
     """Create a stateless JWT access token."""
     now = datetime.now(timezone.utc)
@@ -39,7 +40,10 @@ def create_access_token(
         "iat": now,
         "exp": expire,
     }
+    if jti:
+        payload["jti"] = jti
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
 
 
 def create_refresh_token(

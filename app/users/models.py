@@ -58,11 +58,77 @@ class User(Base, TimestampMixin):
         lazy="selectin",
     )
 
+    # One-to-one relationship with Privacy Settings
+    privacy_settings: Mapped[Optional["UserPrivacySettings"]] = relationship(
+        "UserPrivacySettings",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username} email={self.email}>"
 
 
+class UserPrivacySettings(Base, TimestampMixin):
+    __tablename__ = "user_privacy_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    is_private: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+    allow_comments: Mapped[str] = mapped_column(
+        String(20),
+        default="everyone",
+        server_default="everyone",
+        nullable=False,
+    )
+    allow_mentions: Mapped[str] = mapped_column(
+        String(20),
+        default="everyone",
+        server_default="everyone",
+        nullable=False,
+    )
+    show_activity_status: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+    )
+    search_discoverable: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="privacy_settings",
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserPrivacySettings id={self.id} user_id={self.user_id} is_private={self.is_private}>"
+
+
 class Profile(Base, TimestampMixin):
+
     __tablename__ = "profiles"
 
     id: Mapped[uuid.UUID] = mapped_column(

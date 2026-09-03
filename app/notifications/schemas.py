@@ -45,3 +45,32 @@ class UnreadCountResponse(BaseModel):
 class TypingIndicatorPayload(BaseModel):
     channel: str = Field(..., min_length=36, max_length=36)
     is_typing: bool = True
+
+
+class NotificationPreferencesResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    likes_enabled: bool = True
+    comments_enabled: bool = True
+    follows_enabled: bool = True
+    mentions_enabled: bool = True
+    community_enabled: bool = True
+    email_enabled: bool = False
+    push_enabled: bool = True
+    quiet_hours_enabled: bool = False
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+
+
+class NotificationPreferencesUpdateRequest(BaseModel):
+    likes_enabled: Optional[bool] = None
+    comments_enabled: Optional[bool] = None
+    follows_enabled: Optional[bool] = None
+    mentions_enabled: Optional[bool] = None
+    community_enabled: Optional[bool] = None
+    email_enabled: Optional[bool] = None
+    push_enabled: Optional[bool] = None
+    quiet_hours_enabled: Optional[bool] = None
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+

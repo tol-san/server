@@ -14,6 +14,8 @@ from app.core.exceptions import BadRequestException, ForbiddenException
 from app.communities.repository import community_repository
 from app.chats.schemas import WsTicketResponse
 from app.notifications.schemas import (
+    NotificationPreferencesResponse,
+    NotificationPreferencesUpdateRequest,
     NotificationResponse,
     PaginatedNotificationsResponse,
     TypingIndicatorPayload,
@@ -108,6 +110,37 @@ async def mark_all_as_read(
     service: NotificationService = Depends(lambda: notification_service),
 ):
     return await service.mark_all_as_read(db, current_user)
+
+
+@router.get(
+    "/preferences",
+    response_model=NotificationPreferencesResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get user notification preferences",
+    description="Retrieve in-app, push, and quiet hours notification preferences for the authenticated user.",
+)
+async def get_notification_preferences(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: NotificationService = Depends(lambda: notification_service),
+) -> NotificationPreferencesResponse:
+    return await service.get_preferences(db, current_user.id)
+
+
+@router.patch(
+    "/preferences",
+    response_model=NotificationPreferencesResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update user notification preferences",
+    description="Update notification preference toggles for likes, comments, follows, mentions, community events, push, or quiet hours.",
+)
+async def update_notification_preferences(
+    payload: NotificationPreferencesUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: NotificationService = Depends(lambda: notification_service),
+) -> NotificationPreferencesResponse:
+    return await service.update_preferences(db, current_user.id, payload)
 
 
 @router.delete(

@@ -1,3 +1,4 @@
+import uuid
 from typing import Optional
 import hashlib
 import logging
@@ -5,7 +6,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, status, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_active_user, get_current_jti, get_current_user
 from app.core.cache import cache_service
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ from app.auth.schemas import (
     TokenResponse,
     UserRegisterRequest,
     UserResponse,
+    UserSessionResponse,
     VerifyOtpRequest,
     VerifyOtpResponse,
 )
@@ -121,11 +123,14 @@ async def register(
 )
 async def login(
     payload: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> TokenResponse:
     await _rate_limit(f"ratelimit:login:{payload.identifier.lower()}", max_requests=10, window_seconds=60)
-    return await service.login(db, payload)
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    return await service.login(db, payload, client_ip=client_ip, user_agent=user_agent)
 
 
 @router.post(
@@ -137,10 +142,13 @@ async def login(
 )
 async def refresh_token(
     payload: RefreshTokenRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> TokenRefreshResponse:
-    return await service.refresh_tokens(db, payload.refresh_token)
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    return await service.refresh_tokens(db, payload.refresh_token, client_ip=client_ip, user_agent=user_agent)
 
 
 @router.post(
@@ -152,10 +160,11 @@ async def refresh_token(
 )
 async def logout(
     payload: Optional[RefreshTokenRequest] = None,
+    db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(lambda: auth_service),
 ) -> MessageResponse:
     if payload and payload.refresh_token:
-        await service.logout(payload.refresh_token)
+        await service.logout(db, payload.refresh_token)
     return MessageResponse(message="Successfully logged out.")
 
 
@@ -240,3 +249,53 @@ async def change_password(
 ) -> MessageResponse:
     await service.change_password(db, current_user, payload)
     return MessageResponse(message="Password changed successfully.")
+
+
+@router.get(
+    "/sessions",
+    response_model=list[UserSessionResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List active user sessions",
+    description="Retrieve all active signed-in devices and sessions for the authenticated user.",
+)
+async def get_my_sessions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_jti: Optional[str] = Depends(get_current_jti),
+    service: AuthService = Depends(lambda: auth_service),
+) -> list[UserSessionResponse]:
+    return await service.get_user_sessions(db, current_user.id, current_jti=current_jti)
+
+
+@router.delete(
+    "/sessions/other",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Revoke all other sessions",
+    description="Sign out from all other devices and sessions except the current one.",
+)
+async def revoke_other_sessions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_jti: Optional[str] = Depends(get_current_jti),
+    service: AuthService = Depends(lambda: auth_service),
+) -> MessageResponse:
+    count = await service.revoke_other_sessions(db, current_user.id, current_jti=current_jti)
+    return MessageResponse(message=f"Successfully signed out of {count} other session(s).")
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Revoke a specific session",
+    description="Revoke a specific signed-in device/session by ID.",
+)
+async def revoke_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: AuthService = Depends(lambda: auth_service),
+) -> MessageResponse:
+    await service.revoke_session(db, current_user.id, session_id)
+    return MessageResponse(message="Session successfully revoked.")

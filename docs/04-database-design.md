@@ -9,6 +9,9 @@ The database uses PostgreSQL managed with Async SQLAlchemy 2.0+ and Alembic migr
 ```text
 users                      # Base user account and auth credentials
 profiles                   # Extended user profile details (avatar, bio, counters)
+user_privacy_settings      # User visibility, interaction, and discoverability preferences
+notification_preferences   # Granular notification category toggles and quiet hours
+user_sessions              # Active devices and signed-in sessions with refresh tokens
 interests                  # Admin-managed master taxonomy of interests
 user_interests             # Many-to-many join table for user-selected interests
 
@@ -45,12 +48,16 @@ dead_letter_events         # Failed events exhausted all retries
 ```mermaid
 erDiagram
     USER ||--|| PROFILE : "has"
+    USER ||--|| USER_PRIVACY_SETTINGS : "configures"
+    USER ||--|| NOTIFICATION_PREFERENCES : "customizes"
+    USER ||--o{ USER_SESSION : "authorizes"
     USER ||--o{ USER_INTEREST : "selects"
     INTEREST ||--o{ USER_INTEREST : "belongs_to"
 
     USER ||--o{ FOLLOW : "follower"
     USER ||--o{ FOLLOW : "following"
     USER ||--o{ BLOCK : "blocks"
+
 
     USER ||--o{ COMMUNITY : "owns"
     USER ||--o{ COMMUNITY_MEMBER : "joins"

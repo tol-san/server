@@ -7,12 +7,16 @@ from app.core.database import get_db
 from app.users.models import User
 from app.users.schemas import (
     BlockActionResponse,
+    DeactivateAccountRequest,
+    DeleteAccountRequest,
     FollowActionResponse,
     PaginatedUsersResponse,
     RelationshipResponse,
+    UserPrivacyResponse,
+    UserPrivacyUpdateRequest,
     UserPublicResponse,
 )
-from app.auth.schemas import CheckUsernameResponse
+from app.auth.schemas import CheckUsernameResponse, MessageResponse
 from app.auth.service import AuthService, auth_service
 from app.users.service import UserService, user_service
 
@@ -50,6 +54,71 @@ async def get_my_blocked_users(
     service: UserService = Depends(lambda: user_service),
 ) -> PaginatedUsersResponse:
     return await service.get_blocked_users(db, current_user, limit, offset)
+
+
+@router.get(
+    "/me/privacy",
+    response_model=UserPrivacyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get user privacy settings",
+    description="Retrieve privacy settings for the authenticated user.",
+)
+async def get_privacy_settings(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: UserService = Depends(lambda: user_service),
+) -> UserPrivacyResponse:
+    return await service.get_privacy_settings(db, current_user)
+
+
+@router.patch(
+    "/me/privacy",
+    response_model=UserPrivacyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update user privacy settings",
+    description="Update privacy preferences such as account visibility, comments, mentions, and search discoverability.",
+)
+async def update_privacy_settings(
+    payload: UserPrivacyUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: UserService = Depends(lambda: user_service),
+) -> UserPrivacyResponse:
+    return await service.update_privacy_settings(db, current_user, payload)
+
+
+@router.post(
+    "/me/deactivate",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Deactivate user account",
+    description="Deactivate account, invalidating current sessions and excluding profile from public discovery.",
+)
+async def deactivate_account(
+    payload: DeactivateAccountRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: UserService = Depends(lambda: user_service),
+) -> MessageResponse:
+    await service.deactivate_account(db, current_user, payload.password, payload.reason)
+    return MessageResponse(message="Account successfully deactivated.")
+
+
+@router.delete(
+    "/me",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Permanently delete user account",
+    description="Permanently delete user account, invalidating all credentials and cascading dependent records.",
+)
+async def delete_account(
+    payload: DeleteAccountRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    service: UserService = Depends(lambda: user_service),
+) -> MessageResponse:
+    await service.delete_account(db, current_user, payload.password, payload.confirmation)
+    return MessageResponse(message="Account successfully deleted.")
 
 
 @router.get(

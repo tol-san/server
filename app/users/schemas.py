@@ -52,3 +52,32 @@ class FollowActionResponse(BaseModel):
 class BlockActionResponse(BaseModel):
     is_blocking: bool
     message: str
+
+
+class UserPrivacyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    is_private: bool = False
+    allow_comments: str = "everyone"
+    allow_mentions: str = "everyone"
+    show_activity_status: bool = True
+    search_discoverable: bool = True
+
+
+class UserPrivacyUpdateRequest(BaseModel):
+    is_private: Optional[bool] = None
+    allow_comments: Optional[str] = None
+    allow_mentions: Optional[str] = None
+    show_activity_status: Optional[bool] = None
+    search_discoverable: Optional[bool] = None
+
+
+class DeactivateAccountRequest(BaseModel):
+    password: str
+    reason: Optional[str] = None
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+    confirmation: str
+

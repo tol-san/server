@@ -1,8 +1,16 @@
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
-from app.users.models import User
+from app.core.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
+from app.core.meilisearch import meilisearch_service
+from app.core.security import verify_password
+from app.users.models import User, UserPrivacySettings
 from app.users.repository import UserRepository, user_repository
 from app.users.schemas import (
     BlockActionResponse,
@@ -10,6 +18,8 @@ from app.users.schemas import (
     PaginatedUsersResponse,
     RelationshipResponse,
     UserItemResponse,
+    UserPrivacyResponse,
+    UserPrivacyUpdateRequest,
     UserPublicResponse,
 )
 
@@ -238,6 +248,87 @@ class UserService:
             for u in users
         ]
         return PaginatedUsersResponse(items=items, total=total, limit=limit, offset=offset)
+
+    async def get_privacy_settings(
+        self,
+        db: AsyncSession,
+        current_user: User,
+    ) -> UserPrivacyResponse:
+        privacy = await self.user_repo.get_or_create_privacy(db, current_user.id)
+        return UserPrivacyResponse.model_validate(privacy)
+
+    async def update_privacy_settings(
+        self,
+        db: AsyncSession,
+        current_user: User,
+        payload: UserPrivacyUpdateRequest,
+    ) -> UserPrivacyResponse:
+        updates = payload.model_dump(exclude_unset=True)
+        privacy = await self.user_repo.update_privacy(db, current_user.id, **updates)
+
+        # Sync Meilisearch discoverability if changed
+        if "search_discoverable" in updates:
+            if not privacy.search_discoverable:
+                await meilisearch_service.delete_document("users", str(current_user.id))
+            else:
+                doc = {
+                    "id": str(current_user.id),
+                    "username": current_user.username,
+                    "display_name": current_user.profile.display_name if current_user.profile else current_user.username,
+                    "bio": current_user.profile.bio if current_user.profile else "",
+                    "avatar_url": current_user.profile.avatar_url if current_user.profile else None,
+                    "follower_count": current_user.profile.follower_count if current_user.profile else 0,
+                    "created_at": int(current_user.created_at.timestamp()) if current_user.created_at else 0,
+                }
+                await meilisearch_service.add_documents("users", [doc])
+
+        return UserPrivacyResponse.model_validate(privacy)
+
+    async def deactivate_account(
+        self,
+        db: AsyncSession,
+        current_user: User,
+        password: str,
+        reason: str | None = None,
+    ) -> None:
+        if not verify_password(password, current_user.hashed_password):
+            raise ValidationException("Incorrect password.")
+
+        current_user.is_active = False
+        current_user.token_version += 1
+        await db.commit()
+
+        # Remove from search index
+        await meilisearch_service.delete_document("users", str(current_user.id))
+
+    async def delete_account(
+        self,
+        db: AsyncSession,
+        current_user: User,
+        password: str,
+        confirmation: str,
+    ) -> None:
+        if confirmation.strip().upper() != "DELETE":
+            raise ValidationException("Please type DELETE to confirm account deletion.")
+
+        if not verify_password(password, current_user.hashed_password):
+            raise ValidationException("Incorrect password.")
+
+        # Check if user is sole owner of communities that have active members
+        owned = await self.user_repo.get_owned_communities_with_members(db, current_user.id)
+        if owned:
+            community_names = ", ".join(f"'{c.name}'" for c in owned)
+            raise ConflictException(
+                f"Cannot delete account: you are the sole owner of {community_names}. "
+                "Please transfer ownership or delete your owned communities first."
+            )
+
+        # Invalidate tokens & remove from Meilisearch
+        current_user.token_version += 1
+        await meilisearch_service.delete_document("users", str(current_user.id))
+
+        # Hard delete user (Postgres cascades child rows)
+        await self.user_repo.delete_user_hard(db, current_user)
 
 
 user_service = UserService()
