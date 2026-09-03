@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict
 
 
@@ -13,6 +13,7 @@ class UserSearchResult(BaseModel):
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     follower_count: int = 0
+    is_following: Optional[bool] = None
 
 
 class CommunitySearchResult(BaseModel):
@@ -39,10 +40,13 @@ class PostSearchResult(BaseModel):
     visibility: str
     author_id: Optional[uuid.UUID] = None
     author_username: Optional[str] = None
+    author_avatar_url: Optional[str] = None
     community_id: Optional[uuid.UUID] = None
     community_name: Optional[str] = None
     like_count: int = 0
     comment_count: int = 0
+    thumbnail_url: Optional[str] = None
+    highlight: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
 
 
@@ -99,3 +103,4 @@ class SyncIndexResponse(BaseModel):
     synced_posts: int
     synced_interests: int
     message: str
+

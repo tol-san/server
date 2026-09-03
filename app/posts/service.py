@@ -42,6 +42,17 @@ async def sync_post_search_index(post: Post) -> None:
         await meilisearch_service.delete_post(post.id)
         return
 
+    # Resolve the thumbnail URL for the first media item (if any)
+    first_media = post.media_items[0] if post.media_items else None
+    raw_thumb = first_media.thumbnail_url if first_media else None
+    thumbnail_url = storage_service.get_post_media_url(raw_thumb) if raw_thumb else None
+
+    author_avatar_url: str | None = (
+        post.author.profile.avatar_url
+        if (post.author and post.author.profile)
+        else None
+    )
+
     await meilisearch_service.index_post(
         {
             "id": str(post.id),
@@ -51,13 +62,16 @@ async def sync_post_search_index(post: Post) -> None:
             "visibility": post.visibility,
             "author_id": str(post.author_id),
             "author_username": post.author.username if post.author else None,
+            "author_avatar_url": author_avatar_url,
             "community_id": str(post.community_id) if post.community_id else None,
             "community_name": post.community.name if post.community else None,
             "like_count": post.like_count,
             "comment_count": post.comment_count,
+            "thumbnail_url": thumbnail_url,
             "created_at": post.created_at.isoformat() if post.created_at else None,
         }
     )
+
 
 
 def map_post_to_response(

@@ -31,6 +31,7 @@ async def test_login_with_email_success(async_client: AsyncClient, registered_us
     assert data["expires_in"] > 0
     assert data["user"]["email"] == registered_user["email"]
     assert data["user"]["username"] == registered_user["username"]
+    assert data["user"]["is_superuser"] is False
 
 
 @pytest.mark.asyncio

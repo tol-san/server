@@ -134,6 +134,42 @@
 | `GET` | `/api/v1/search/interests` | Search interests taxonomy |
 | `POST` | `/api/v1/search/sync` | Full index synchronization to Meilisearch (Admin only) |
 
+#### Search Integration Strategy
+
+- **Users & Interests**: Meilisearch is used directly for typo-tolerant full-text search with block-safety enforced in-memory. Falls back to PostgreSQL `LIKE` queries when Meilisearch is unavailable.
+- **Communities & Posts**: Meilisearch is used as a *first-pass candidate filter* (typo-tolerant ranking). A second SQL query re-checks authorization (visibility, privacy, blocks, community membership) on the candidate IDs, ensuring correctness. Falls back to PostgreSQL-only when Meilisearch is unavailable.
+- **Write-path sync**: Indexes are updated immediately on entity create/update/delete via `sync_post_search_index`, `sync_community_search_index`, etc. Private community posts and non-public posts are removed from the index on visibility change.
+- **Admin re-sync**: `POST /api/v1/search/sync` triggers a full extraction and re-index of all public entities.
+
+#### `PostSearchResult` Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | UUID | Post identifier |
+| `title` | string? | Post title |
+| `content` | string? | Post body text |
+| `post_type` | string | `text` / `image` / `video` |
+| `visibility` | string | `public` / `followers_only` / `private` |
+| `author_id` | UUID? | Author user identifier |
+| `author_username` | string? | Author's username |
+| `author_avatar_url` | string? | Raw author profile avatar URL (s3:// path) |
+| `community_id` | UUID? | Community identifier (if community post) |
+| `community_name` | string? | Community name |
+| `like_count` | int | Total likes |
+| `comment_count` | int | Total comments |
+| `thumbnail_url` | string? | Presigned URL for first media item thumbnail (resolved at index time for image/video posts) |
+| `highlight` | object? | Meilisearch `_formatted` snippet dict with `<em>`-tagged matched fragments (keys: `title`, `content`) |
+| `created_at` | datetime? | Post creation timestamp |
+
+#### `UserSearchResult` Response Fields
+
+Includes `is_following: bool?` — set when the authenticated user is provided, allowing the client to render follow state in search cards without a separate API round-trip.
+
+Authenticated login/signup user payloads include `is_superuser`. The Flutter
+client uses this server-authoritative flag only to expose platform moderation
+navigation and the administrator-only `user_suspended` resolution option;
+every moderation endpoint still enforces authorization independently.
+
 ### Notifications & Reports (`/api/v1/notifications`, `/api/v1/reports`)
 | Method | Path | Description |
 | --- | --- | --- |

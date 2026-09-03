@@ -80,6 +80,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     username: str
     is_active: bool
+    is_superuser: bool = False
     created_at: datetime
     profile: Optional[ProfileResponse] = None
 

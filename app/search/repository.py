@@ -49,6 +49,15 @@ class SearchRepository:
             str(uid) for uid in res2.scalars().all()
         }
 
+    async def get_following_user_ids(
+        self, db: AsyncSession, user_id: Optional[uuid.UUID]
+    ) -> set[str]:
+        if not user_id:
+            return set()
+        stmt = select(Follow.following_id).where(Follow.follower_id == user_id)
+        res = await db.execute(stmt)
+        return {str(uid) for uid in res.scalars().all()}
+
     async def search_users(
         self,
         db: AsyncSession,
@@ -191,6 +200,70 @@ class SearchRepository:
 
         result = await db.execute(stmt)
         return result.scalars().all(), total
+
+    async def search_communities_by_ids(
+        self,
+        db: AsyncSession,
+        *,
+        community_ids: List[uuid.UUID],
+        current_user_id: Optional[uuid.UUID] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Sequence[Community]:
+        """Fetch communities by a pre-ranked list of IDs, enforcing access controls.
+
+        Used when Meilisearch returns candidate IDs and SQL must re-check authorization
+        (privacy, membership) before returning results to the caller.
+        """
+        if not community_ids:
+            return []
+        filters = [
+            *community_access_filters(current_user_id),
+            Community.id.in_(community_ids),
+        ]
+        stmt = (
+            select(Community)
+            .where(*filters)
+            .options(selectinload(Community.interest))
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    async def search_posts_by_ids(
+        self,
+        db: AsyncSession,
+        *,
+        post_ids: List[uuid.UUID],
+        current_user_id: Optional[uuid.UUID] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Sequence[Post]:
+        """Fetch posts by a pre-ranked list of IDs, enforcing access controls.
+
+        Used when Meilisearch returns candidate IDs and SQL must re-check authorization
+        (visibility, blocks, community membership) before returning results.
+        """
+        if not post_ids:
+            return []
+        filters = [
+            *post_access_filters(current_user_id),
+            Post.id.in_(post_ids),
+        ]
+        stmt = (
+            select(Post)
+            .where(*filters)
+            .options(
+                selectinload(Post.author).selectinload(User.profile),
+                selectinload(Post.community),
+                selectinload(Post.media_items),
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all()
 
     # --- Full Extraction for Index Syncing ---
     async def fetch_all_users_for_sync(self, db: AsyncSession) -> Sequence[User]:

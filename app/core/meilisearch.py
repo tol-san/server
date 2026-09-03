@@ -186,19 +186,46 @@ class MeilisearchService:
         offset: int = 0,
         filter: Optional[Union[str, List[str]]] = None,
         sort: Optional[List[str]] = None,
+        attributes_to_highlight: Optional[List[str]] = None,
+        attributes_to_crop: Optional[List[str]] = None,
+        crop_length: int = 20,
     ) -> Dict[str, Any]:
-        """Search within a specific index with pagination and filters."""
+        """Search within a specific index with pagination, filters, and optional highlighting.
+
+        When ``attributes_to_highlight`` is provided, each hit in the returned list will
+        contain a ``_highlight`` dict mapping attribute name → HTML-marked snippet (using
+        Meilisearch's default ``<em>`` tags) sourced from the ``_formatted`` response field.
+        """
         try:
             index = self.client.index(index_name)
-            response = await index.search(
+            search_kwargs: Dict[str, Any] = dict(
                 query=query,
                 limit=limit,
                 offset=offset,
                 filter=filter,
                 sort=sort,
             )
+            if attributes_to_highlight:
+                search_kwargs["attributes_to_highlight"] = attributes_to_highlight
+            if attributes_to_crop:
+                search_kwargs["attributes_to_crop"] = attributes_to_crop
+                search_kwargs["crop_length"] = crop_length
+
+            response = await index.search(**search_kwargs)
+            raw_hits: List[Dict[str, Any]] = getattr(response, "hits", []) or []
+
+            # Attach flattened highlight dict when highlighting was requested
+            if attributes_to_highlight:
+                for hit in raw_hits:
+                    formatted: Dict[str, Any] = hit.pop("_formatted", {}) or {}
+                    hit["_highlight"] = {
+                        attr: formatted.get(attr)
+                        for attr in attributes_to_highlight
+                        if formatted.get(attr) is not None
+                    }
+
             return {
-                "hits": getattr(response, "hits", []),
+                "hits": raw_hits,
                 "total": getattr(response, "estimated_total_hits", 0)
                 or getattr(response, "total_hits", 0),
                 "limit": limit,

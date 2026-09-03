@@ -28,6 +28,16 @@ from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
+# Fields highlighted in search results (Meilisearch <em> tags)
+_USER_HIGHLIGHT_ATTRS = ["username", "display_name", "bio"]
+_COMMUNITY_HIGHLIGHT_ATTRS = ["name", "description"]
+_POST_HIGHLIGHT_ATTRS = ["title", "content"]
+_INTEREST_HIGHLIGHT_ATTRS = ["name", "description"]
+
+
+def _parse_uuid(value: Any) -> uuid.UUID:
+    return uuid.UUID(value) if isinstance(value, str) else value
+
 
 class SearchService:
     """Service handling multi-entity search with Meilisearch engine and PostgreSQL fallback."""
@@ -40,6 +50,10 @@ class SearchService:
         self.repo = search_repo
         self.meili = meili
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Users
+    # ─────────────────────────────────────────────────────────────────────────
+
     async def search_users(
         self,
         db: AsyncSession,
@@ -49,37 +63,48 @@ class SearchService:
         offset: int = 0,
     ) -> PaginatedUserSearchResponse:
         current_uid = current_user.id if current_user else None
+        following_ids: set[str] = set()
+        if current_uid:
+            following_ids = await self.repo.get_following_user_ids(db, current_uid)
 
-        # 1. Try Meilisearch if available
+        # 1. Try Meilisearch with highlighting
         if await self.meili.is_healthy():
             res = await self.meili.search(
                 INDEX_USERS,
                 query=query,
                 limit=limit,
                 offset=offset,
+                attributes_to_highlight=_USER_HIGHLIGHT_ATTRS,
             )
-            hits = res.get("hits", [])
-            total = res.get("total") or 0
+            hits: List[Dict[str, Any]] = res.get("hits", [])
+            total: int = res.get("total") or 0
+
+            # Block-safety: filter out blocked users
             if current_uid and hits:
                 blocked_ids = await self.repo.get_blocked_user_ids(db, current_uid)
                 hits = [h for h in hits if str(h.get("id")) not in blocked_ids]
+
             if hits:
                 items = [
                     UserSearchResult(
-                        id=uuid.UUID(h["id"]) if isinstance(h["id"], str) else h["id"],
+                        id=_parse_uuid(h["id"]),
                         username=h.get("username", ""),
                         display_name=h.get("display_name"),
                         avatar_url=h.get("avatar_url"),
                         bio=h.get("bio"),
                         follower_count=h.get("follower_count", 0),
+                        is_following=(str(h.get("id")) in following_ids) if current_uid else None,
                     )
                     for h in hits
                 ]
                 return PaginatedUserSearchResponse(
-                    items=items, total=len(hits) if current_uid else total, limit=limit, offset=offset
+                    items=items,
+                    total=len(hits) if current_uid else total,
+                    limit=limit,
+                    offset=offset,
                 )
 
-        # 2. Fallback to SQL query
+        # 2. SQL fallback
         users, total = await self.repo.search_users(
             db,
             query=query,
@@ -95,12 +120,17 @@ class SearchService:
                 avatar_url=u.profile.avatar_url if u.profile else None,
                 bio=u.profile.bio if u.profile else None,
                 follower_count=u.profile.follower_count if u.profile else 0,
+                is_following=(str(u.id) in following_ids) if current_uid else None,
             )
             for u in users
         ]
         return PaginatedUserSearchResponse(
             items=items, total=total, limit=limit, offset=offset
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Communities
+    # ─────────────────────────────────────────────────────────────────────────
 
     async def search_communities(
         self,
@@ -112,8 +142,59 @@ class SearchService:
     ) -> PaginatedCommunitySearchResponse:
         current_uid = current_user.id if current_user else None
 
-        # Community visibility depends on live membership state, so authorization
-        # must be applied by PostgreSQL rather than trusting denormalized index hits.
+        # 1. Try Meilisearch as a candidate filter, then re-check authorization in SQL.
+        #    This gives typo-tolerant FT ranking while keeping correctness (membership,
+        #    privacy) enforced by the live database.
+        if await self.meili.is_healthy():
+            res = await self.meili.search(
+                INDEX_COMMUNITIES,
+                query=query,
+                # Fetch a generous batch so SQL re-check doesn't under-return
+                limit=limit * 3,
+                offset=0,
+                attributes_to_highlight=_COMMUNITY_HIGHLIGHT_ATTRS,
+            )
+            hits: List[Dict[str, Any]] = res.get("hits", [])
+            if hits:
+                candidate_ids = [_parse_uuid(h["id"]) for h in hits]
+                highlight_map: Dict[str, Any] = {
+                    str(h["id"]): h.get("_highlight", {}) for h in hits
+                }
+                communities = await self.repo.search_communities_by_ids(
+                    db,
+                    community_ids=candidate_ids,
+                    current_user_id=current_uid,
+                    limit=limit,
+                    offset=offset,
+                )
+                # Preserve Meilisearch ranking order
+                id_order = {str(cid): idx for idx, cid in enumerate(candidate_ids)}
+                communities = sorted(
+                    communities, key=lambda c: id_order.get(str(c.id), 9999)
+                )
+                items = [
+                    CommunitySearchResult(
+                        id=c.id,
+                        name=c.name,
+                        slug=c.slug,
+                        description=c.description,
+                        avatar_url=c.avatar_url,
+                        cover_image_url=c.cover_image_url,
+                        is_private=c.is_private,
+                        member_count=c.member_count,
+                        post_count=c.post_count,
+                    )
+                    for c in communities
+                ]
+                if items:
+                    return PaginatedCommunitySearchResponse(
+                        items=items,
+                        total=res.get("total") or len(items),
+                        limit=limit,
+                        offset=offset,
+                    )
+
+        # 2. SQL fallback (always-correct, used when Meili is down or returns nothing)
         communities, total = await self.repo.search_communities(
             db,
             query=query,
@@ -139,6 +220,10 @@ class SearchService:
             items=items, total=total, limit=limit, offset=offset
         )
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Posts
+    # ─────────────────────────────────────────────────────────────────────────
+
     async def search_posts(
         self,
         db: AsyncSession,
@@ -149,8 +234,71 @@ class SearchService:
     ) -> PaginatedPostSearchResponse:
         current_uid = current_user.id if current_user else None
 
-        # Post visibility includes follows, blocks, ownership, and community
-        # membership. Apply the canonical live SQL policy for every result.
+        # 1. Try Meilisearch as a candidate filter.
+        #    Post visibility (follows, blocks, community membership) is enforced by SQL.
+        if await self.meili.is_healthy():
+            res = await self.meili.search(
+                INDEX_POSTS,
+                query=query,
+                limit=limit * 3,
+                offset=0,
+                attributes_to_highlight=_POST_HIGHLIGHT_ATTRS,
+                attributes_to_crop=["content"],
+                crop_length=25,
+            )
+            hits: List[Dict[str, Any]] = res.get("hits", [])
+            if hits:
+                candidate_ids = [_parse_uuid(h["id"]) for h in hits]
+                highlight_map: Dict[str, Any] = {
+                    str(h["id"]): h.get("_highlight", {}) for h in hits
+                }
+                # Store Meilisearch-returned field values for enrichment
+                meili_meta: Dict[str, Dict[str, Any]] = {str(h["id"]): h for h in hits}
+
+                posts = await self.repo.search_posts_by_ids(
+                    db,
+                    post_ids=candidate_ids,
+                    current_user_id=current_uid,
+                    limit=limit,
+                    offset=offset,
+                )
+                # Preserve Meilisearch ranking order
+                id_order = {str(pid): idx for idx, pid in enumerate(candidate_ids)}
+                posts = sorted(posts, key=lambda p: id_order.get(str(p.id), 9999))
+
+                items = [
+                    PostSearchResult(
+                        id=p.id,
+                        title=p.title,
+                        content=p.content,
+                        post_type=p.post_type,
+                        visibility=p.visibility,
+                        author_id=p.author_id,
+                        author_username=p.author.username if p.author else None,
+                        author_avatar_url=(
+                            p.author.profile.avatar_url
+                            if (p.author and p.author.profile)
+                            else None
+                        ),
+                        community_id=p.community_id,
+                        community_name=p.community.name if p.community else None,
+                        like_count=p.like_count,
+                        comment_count=p.comment_count,
+                        thumbnail_url=meili_meta.get(str(p.id), {}).get("thumbnail_url"),
+                        highlight=highlight_map.get(str(p.id)) or None,
+                        created_at=p.created_at,
+                    )
+                    for p in posts
+                ]
+                if items:
+                    return PaginatedPostSearchResponse(
+                        items=items,
+                        total=res.get("total") or len(items),
+                        limit=limit,
+                        offset=offset,
+                    )
+
+        # 2. SQL fallback
         posts, total = await self.repo.search_posts(
             db,
             query=query,
@@ -167,6 +315,11 @@ class SearchService:
                 visibility=p.visibility,
                 author_id=p.author_id,
                 author_username=p.author.username if p.author else None,
+                author_avatar_url=(
+                    p.author.profile.avatar_url
+                    if (p.author and p.author.profile)
+                    else None
+                ),
                 community_id=p.community_id,
                 community_name=p.community.name if p.community else None,
                 like_count=p.like_count,
@@ -178,6 +331,10 @@ class SearchService:
         return PaginatedPostSearchResponse(
             items=items, total=total, limit=limit, offset=offset
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Interests
+    # ─────────────────────────────────────────────────────────────────────────
 
     async def search_interests(
         self,
@@ -194,13 +351,14 @@ class SearchService:
                 query=query,
                 limit=limit,
                 offset=offset,
+                attributes_to_highlight=_INTEREST_HIGHLIGHT_ATTRS,
             )
-            hits = res.get("hits", [])
-            total = res.get("total") or 0
+            hits: List[Dict[str, Any]] = res.get("hits", [])
+            total: int = res.get("total") or 0
             if hits or total > 0:
                 items = [
                     InterestSearchResult(
-                        id=uuid.UUID(h["id"]) if isinstance(h["id"], str) else h["id"],
+                        id=_parse_uuid(h["id"]),
                         name=h.get("name", ""),
                         slug=h.get("slug", ""),
                         description=h.get("description"),
@@ -229,6 +387,10 @@ class SearchService:
         return PaginatedInterestSearchResponse(
             items=items, total=total, limit=limit, offset=offset
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Unified
+    # ─────────────────────────────────────────────────────────────────────────
 
     async def search_unified(
         self,
@@ -282,6 +444,10 @@ class SearchService:
             await cache_service.set(cache_key, resp.model_dump(mode="json"), ttl=120)
 
         return resp
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Admin: full index re-sync
+    # ─────────────────────────────────────────────────────────────────────────
 
     async def sync_all_indexes(self, db: AsyncSession) -> SyncIndexResponse:
         """Extract all database records and index them into Meilisearch."""
@@ -345,7 +511,7 @@ class SearchService:
         ]
         await self.meili.index_documents(INDEX_COMMUNITIES, comm_docs)
 
-        # 3. Sync Posts
+        # 3. Sync Posts (with enriched thumbnail_url and author_avatar_url)
         posts = await self.repo.fetch_all_posts_for_sync(db)
         post_docs = [
             {
@@ -356,10 +522,19 @@ class SearchService:
                 "visibility": p.visibility,
                 "author_id": str(p.author_id),
                 "author_username": p.author.username if p.author else None,
+                "author_avatar_url": (
+                    p.author.profile.avatar_url
+                    if (p.author and p.author.profile)
+                    else None
+                ),
                 "community_id": str(p.community_id) if p.community_id else None,
                 "community_name": p.community.name if p.community else None,
                 "like_count": p.like_count,
                 "comment_count": p.comment_count,
+                # Raw s3:// thumbnail URL; resolved by client or post API on demand
+                "thumbnail_url": (
+                    p.media_items[0].thumbnail_url if p.media_items else None
+                ),
                 "created_at": p.created_at.isoformat() if p.created_at else None,
             }
             for p in posts
