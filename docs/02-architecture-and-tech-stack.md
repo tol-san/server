@@ -174,6 +174,11 @@ A centralized cache-aside layer ([`app/core/cache.py`](file:///c:/Users/tolsa/De
 ### Media Storage
 Media files are **not stored directly in PostgreSQL**. PostgreSQL only stores metadata and media URLs.
 
+New post uploads are stored canonically in the private MinIO bucket and are
+presigned when returned by post and feed APIs. Seeded or legacy post media that
+already uses an external HTTP(S) host is returned unchanged; it is never parsed
+or sent to MinIO as an object-storage bucket.
+
 - **Storage Providers**: Amazon S3 / Cloudflare R2 / MinIO / Cloudinary
 - **Post & Media metadata structure**:
   ```text

@@ -3,6 +3,7 @@ import pytest
 from httpx import AsyncClient
 from PIL import Image
 
+from app.core.config import settings
 from app.core.storage import storage_service
 
 
@@ -67,6 +68,45 @@ def test_process_and_convert_to_webp():
         assert result_img.format == "WEBP"
         assert result_img.width <= 512
         assert result_img.height <= 512
+
+
+def test_get_post_media_url_presigns_canonical_storage_url(mock_object_storage):
+    canonical_url = "s3://genz-media-private/posts/user-id/videos/clip.mp4"
+
+    resolved_url = storage_service.get_post_media_url(canonical_url)
+
+    assert resolved_url == (
+        "http://storage.test/genz-media-private/"
+        "posts/user-id/videos/clip.mp4?signature=test"
+    )
+    mock_object_storage.presigned_get_object.assert_called_once()
+
+
+def test_get_post_media_url_presigns_public_minio_url(mock_object_storage):
+    minio_url = (
+        f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/genz-media-private/"
+        "posts/user-id/images/photo.webp"
+    )
+
+    resolved_url = storage_service.get_post_media_url(minio_url)
+
+    assert resolved_url == (
+        "http://storage.test/genz-media-private/"
+        "posts/user-id/images/photo.webp?signature=test"
+    )
+    mock_object_storage.presigned_get_object.assert_called_once()
+
+
+def test_get_post_media_url_keeps_external_http_url(mock_object_storage):
+    external_url = (
+        "https://cdn.jsdelivr.net/gh/intel-iot-devkit/"
+        "sample-videos@master/person-bicycle-car-detection.mp4"
+    )
+
+    resolved_url = storage_service.get_post_media_url(external_url)
+
+    assert resolved_url == external_url
+    mock_object_storage.presigned_get_object.assert_not_called()
 
 
 @pytest.mark.asyncio

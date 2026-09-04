@@ -216,6 +216,19 @@ class StorageService:
     def get_post_media_url(self, url: Optional[str]) -> Optional[str]:
         if not url:
             return None
+
+        parsed = urlparse(url)
+        if parsed.scheme.lower() in {"http", "https"}:
+            public_storage = urlparse(settings.MINIO_PUBLIC_URL)
+            managed_hosts = {
+                public_storage.netloc.lower(),
+                settings.MINIO_ENDPOINT.lower().rstrip("/"),
+            }
+            # Seeded and legacy posts may reference externally hosted media. Only
+            # URLs pointing at this application's object storage need presigning.
+            if parsed.netloc.lower() not in managed_hosts:
+                return url
+
         bucket, object_name = self._parse_storage_url(url)
         try:
             return self.client.presigned_get_object(
